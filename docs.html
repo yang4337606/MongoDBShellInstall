@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>使用文档 - MongoDBShellInstall</title>
+<meta name="description" content="MongoDBShellInstall 使用文档，包含快速入门、环境准备、单机/副本集安装教程及完整参数参考。">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><defs><linearGradient id='g' x1='0' y1='0' x2='0' y2='1'><stop offset='0%' stop-color='%2313AA52'/><stop offset='100%' stop-color='%2300684A'/></linearGradient></defs><rect x='4' y='4' width='24' height='24' rx='6' fill='url(%23g)'/><text x='16' y='22' text-anchor='middle' font-family='monospace' font-weight='700' font-size='16' fill='white'>M</text></svg>">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+:root{--mg-primary:#00684A;--mg-primary-dark:#004D3A;--mg-primary-light:#13AA52;--bg-primary:#fafbfc;--bg-secondary:#f0f2f5;--bg-card:#fff;--bg-code:#1e2a3a;--text-primary:#1a2332;--text-secondary:#4a5568;--text-muted:#8896a6;--border-color:#e2e8f0;--border-subtle:#edf2f7;--shadow-sm:0 1px 3px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04);--shadow-md:0 4px 12px rgba(0,0,0,.07);--shadow-lg:0 12px 40px rgba(0,0,0,.1);--radius-sm:6px;--radius-md:10px;--radius-lg:16px;--font-display:'DM Sans','Noto Sans SC',sans-serif;--font-body:'Noto Sans SC','DM Sans',sans-serif;--font-mono:'JetBrains Mono',monospace;--nav-height:64px;--sidebar-width:260px;--max-width:1200px;--transition-fast:.2s cubic-bezier(.4,0,.2,1)}
+[data-theme="dark"]{--bg-primary:#0f1923;--bg-secondary:#162230;--bg-card:#1a2d3d;--bg-code:#0d1520;--text-primary:#e8edf2;--text-secondary:#a0b0c0;--text-muted:#607080;--border-color:#253545;--border-subtle:#1e3040;--shadow-sm:0 1px 3px rgba(0,0,0,.2);--shadow-md:0 4px 12px rgba(0,0,0,.25);--shadow-lg:0 12px 40px rgba(0,0,0,.35);--mg-primary-light:#3FC56B}
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:calc(var(--nav-height) + 24px)}
+body{font-family:var(--font-body);background:var(--bg-primary);background-image:radial-gradient(circle,rgba(0,104,74,.04) 1px,transparent 1px);background-size:24px 24px;color:var(--text-primary);line-height:1.7;-webkit-font-smoothing:antialiased}
+[data-theme="dark"] body{background-image:radial-gradient(circle,rgba(19,170,82,.03) 1px,transparent 1px)}
+a{color:var(--mg-primary-light);text-decoration:none;transition:color var(--transition-fast)}a:hover{color:var(--mg-primary)}
+.nav{position:fixed;top:0;left:0;right:0;z-index:1000;height:var(--nav-height);background:rgba(250,251,252,.85);backdrop-filter:blur(20px) saturate(180%);-webkit-backdrop-filter:blur(20px) saturate(180%);border-bottom:1px solid var(--border-subtle)}
+[data-theme="dark"] .nav{background:rgba(15,25,35,.88)}
+.nav-inner{max-width:var(--max-width);margin:0 auto;padding:0 24px;height:100%;display:flex;align-items:center;justify-content:space-between}
+.nav-brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px;color:var(--text-primary)}
+.nav-brand-icon{width:32px;height:32px;background:linear-gradient(135deg,var(--mg-primary),var(--mg-primary-light));border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;font-size:18px;color:#fff;font-family:var(--font-mono);font-weight:700;box-shadow:0 2px 8px rgba(0,104,74,.3)}
+.nav-brand span{font-family:var(--font-display);letter-spacing:-.5px}
+.nav-links{display:flex;align-items:center;gap:6px}
+.nav-links a{padding:6px 14px;border-radius:var(--radius-sm);font-size:14px;font-weight:500;color:var(--text-secondary);transition:all var(--transition-fast)}
+.nav-links a:hover{color:var(--text-primary);background:var(--bg-secondary)}
+.nav-links a.active{color:var(--mg-primary);background:rgba(0,104,74,.08)}
+.nav-right{display:flex;align-items:center;gap:8px}
+.theme-toggle{width:36px;height:36px;border-radius:var(--radius-sm);border:1px solid var(--border-color);background:var(--bg-card);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;transition:all var(--transition-fast);color:var(--text-secondary)}
+.theme-toggle:hover{border-color:var(--mg-primary);color:var(--mg-primary)}
+.nav-cta{padding:7px 18px;border-radius:var(--radius-sm);font-size:13px;font-weight:600;background:var(--mg-primary);color:#fff!important}
+.mobile-toggle{display:none;background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-primary)}
+.docs-layout{display:flex;max-width:var(--max-width);margin:0 auto;padding-top:var(--nav-height)}
+.sidebar{width:var(--sidebar-width);position:fixed;top:var(--nav-height);bottom:0;overflow-y:auto;padding:24px 20px;border-right:1px solid var(--border-subtle);background:linear-gradient(180deg,var(--bg-primary) 0%,var(--bg-secondary) 100%);scrollbar-width:thin}
+.sidebar::before{content:'';position:absolute;top:0;left:0;right:0;bottom:0;background-image:linear-gradient(rgba(0,104,74,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(0,104,74,.03) 1px,transparent 1px);background-size:20px 20px;pointer-events:none}
+[data-theme="dark"] .sidebar{background:linear-gradient(180deg,var(--bg-primary) 0%,rgba(22,34,48,.95) 100%)}
+[data-theme="dark"] .sidebar::before{background-image:linear-gradient(rgba(19,170,82,.02) 1px,transparent 1px),linear-gradient(90deg,rgba(19,170,82,.02) 1px,transparent 1px)}
+.sidebar::-webkit-scrollbar{width:4px}.sidebar::-webkit-scrollbar-thumb{background:var(--border-color);border-radius:2px}
+.sidebar-group{margin-bottom:24px}
+.sidebar-group-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:1.5px;color:var(--text-muted);margin-bottom:8px;padding:0 8px}
+.sidebar a{display:block;padding:5px 12px;border-radius:var(--radius-sm);font-size:13px;color:var(--text-secondary);transition:all var(--transition-fast);margin-bottom:1px}
+.sidebar a:hover{color:var(--text-primary);background:var(--bg-secondary)}
+.sidebar a.active{color:var(--mg-primary);background:rgba(0,104,74,.08);font-weight:500}
+.doc-content{margin-left:var(--sidebar-width);flex:1;padding:36px 48px 80px;max-width:calc(100% - var(--sidebar-width));min-height:100vh}
+.doc-content h2{font-family:var(--font-display);font-size:26px;font-weight:700;letter-spacing:-.5px;margin:48px 0 16px;padding-top:16px;position:relative}
+.doc-content h2::after{content:'';display:block;margin-top:8px;height:3px;width:60px;border-radius:2px;background:linear-gradient(90deg,var(--mg-primary),var(--mg-primary-light),transparent)}
+[data-theme="dark"] .doc-content h2::after{background:linear-gradient(90deg,var(--mg-primary-light),var(--mg-primary),transparent)}
+.doc-content h2::before{content:'';position:absolute;top:16px;left:0;right:0;height:1px;background:linear-gradient(90deg,var(--border-subtle),var(--border-color) 30%,var(--border-subtle) 70%,transparent)}
+.doc-content h2:first-child{margin-top:0;padding-top:0}.doc-content h2:first-child::before{display:none}
+.doc-content h3{font-size:18px;font-weight:600;margin:32px 0 12px}
+.doc-content h4{font-size:15px;font-weight:600;margin:24px 0 8px}
+.doc-content p{margin-bottom:14px;color:var(--text-secondary);font-size:14.5px}
+.doc-content strong{color:var(--text-primary);font-weight:600}
+.doc-content ul,.doc-content ol{margin:0 0 16px 20px;color:var(--text-secondary);font-size:14.5px}
+.doc-content li{margin-bottom:6px}
+.doc-content .note{background:rgba(0,104,74,.06);border-left:3px solid var(--mg-primary);padding:12px 16px;border-radius:0 var(--radius-sm) var(--radius-sm) 0;margin:16px 0;font-size:13.5px;color:var(--text-secondary)}
+.doc-content .warn{background:rgba(229,62,62,.06);border-left:3px solid #e53e3e;padding:12px 16px;border-radius:0 var(--radius-sm) var(--radius-sm) 0;margin:16px 0;font-size:13.5px;color:var(--text-secondary)}
+.code-block{position:relative;margin:16px 0;border-radius:var(--radius-md);overflow:hidden;background:var(--bg-code);box-shadow:var(--shadow-sm),0 0 12px rgba(0,104,74,.08)}
+[data-theme="dark"] .code-block{box-shadow:var(--shadow-sm),0 0 16px rgba(0,104,74,.12)}
+.code-header{display:flex;justify-content:space-between;align-items:center;padding:8px 16px;background:rgba(255,255,255,.04);border-bottom:1px solid rgba(255,255,255,.06)}
+.code-lang{font-family:var(--font-mono);font-size:11px;color:rgba(255,255,255,.35);text-transform:uppercase;letter-spacing:1px}
+.code-copy{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);color:rgba(255,255,255,.5);padding:3px 10px;border-radius:4px;font-size:11px;cursor:pointer;font-family:var(--font-body);transition:all var(--transition-fast)}
+.code-copy:hover{background:rgba(255,255,255,.15);color:#fff}
+.code-body{padding:16px 20px;font-family:var(--font-mono);font-size:13px;line-height:1.8;color:#e8edf2;overflow-x:auto;white-space:pre}
+.code-body .c{color:#607080}.code-body .p{color:#5aafff}.code-body .v{color:#ffd866}.code-body .g{color:#28c840}
+.doc-table{width:100%;border-collapse:collapse;margin:16px 0;font-size:13.5px}
+.doc-table th{background:var(--bg-secondary);padding:10px 14px;text-align:left;font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-muted);border-bottom:2px solid var(--border-color)}
+.doc-table td{padding:10px 14px;border-bottom:1px solid var(--border-subtle);color:var(--text-secondary);vertical-align:top}
+.doc-table td:first-child{font-family:var(--font-mono);font-weight:500;color:var(--mg-primary);white-space:nowrap;font-size:13px}
+.doc-table tr:hover td{background:rgba(0,104,74,.02)}
+.doc-content code{font-family:var(--font-mono);font-size:12.5px;background:var(--bg-secondary);padding:2px 6px;border-radius:4px;color:var(--mg-primary)}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--mg-primary);color:#fff;padding:10px 24px;border-radius:var(--radius-md);font-size:14px;font-weight:500;opacity:0;transition:all .3s ease;z-index:9999;box-shadow:var(--shadow-lg)}
+.toast.show{transform:translateX(-50%) translateY(0);opacity:1}
+.sidebar-toggle{display:none;position:fixed;bottom:24px;left:24px;z-index:999;width:44px;height:44px;border-radius:var(--radius-md);background:var(--mg-primary);color:#fff;border:none;cursor:pointer;font-size:20px;box-shadow:var(--shadow-md);align-items:center;justify-content:center}
+@media(max-width:768px){
+  .nav-links{display:none}.mobile-toggle{display:block}
+  .nav-links.open{display:flex;flex-direction:column;position:absolute;top:var(--nav-height);left:0;right:0;background:var(--bg-card);border-bottom:1px solid var(--border-color);padding:16px 24px;gap:4px;box-shadow:var(--shadow-md)}
+  .sidebar{display:none;position:fixed;z-index:998;width:280px;background:var(--bg-card);box-shadow:var(--shadow-lg)}
+  .sidebar.open{display:block}.sidebar-toggle{display:flex}
+  .doc-content{margin-left:0;padding:24px 20px 80px}
+}
+body::after{content:'';position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9998;opacity:.025;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");background-repeat:repeat;background-size:300px 300px}
+[data-theme="dark"] body::after{opacity:.035}
+.back-to-top{position:fixed;bottom:28px;right:28px;z-index:999;width:48px;height:48px;opacity:0;pointer-events:none;transition:all .3s ease}
+.back-to-top.visible{opacity:1;pointer-events:auto}.back-to-top:hover{transform:translateY(-3px)}
+.btt-progress{position:absolute;top:0;left:0;width:48px;height:48px;transform:rotate(-90deg)}
+.btt-progress circle{fill:none;stroke:var(--mg-primary);stroke-width:2.5;stroke-dasharray:125.66;stroke-dashoffset:125.66;stroke-linecap:round;transition:stroke-dashoffset .1s linear}
+.btt-btn{position:absolute;top:4px;left:4px;width:40px;height:40px;border-radius:50%;border:1px solid var(--border-color);background:var(--bg-card);color:var(--mg-primary);font-size:18px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:var(--shadow-md);transition:all .2s ease}
+.btt-btn:hover{background:var(--mg-primary);color:#fff}
+.code-block.collapsible .code-body{max-height:200px;overflow:hidden;position:relative}
+.code-block.collapsible.expanded .code-body{max-height:none}
+.code-fold-overlay{position:absolute;bottom:0;left:0;right:0;height:60px;background:linear-gradient(transparent,var(--bg-code));pointer-events:none}
+.code-block.expanded .code-fold-overlay{display:none}
+.code-fold-btn{display:block;width:100%;padding:8px;border:none;background:rgba(255,255,255,.04);border-top:1px solid rgba(255,255,255,.06);color:var(--mg-primary-light);font-size:12px;font-family:var(--font-body);cursor:pointer;transition:all .2s;text-align:center}
+.code-fold-btn:hover{background:rgba(255,255,255,.08);color:#fff}
+</style>
+</head>
+<body>
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="index.html" class="nav-brand"><div class="nav-brand-icon">M</div><span>MongoDBShellInstall</span></a>
+    <div class="nav-links" id="navLinks">
+      <a href="index.html">首页</a>
+      <a href="generator.html">命令生成器</a>
+      <a href="docs.html" class="active">使用文档</a>
+    </div>
+    <div class="nav-right">
+      <button class="theme-toggle" id="themeToggle" title="切换主题">☀</button>
+      <a href="generator.html" class="nav-cta">开始使用</a>
+      <button class="mobile-toggle" id="mobileToggle">☰</button>
+    </div>
+  </div>
+</nav>
+<div class="docs-layout">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-group">
+      <div class="sidebar-group-title">快速入门</div>
+      <a href="#quickstart" class="active">快速开始</a>
+      <a href="#prepare">环境准备</a>
+      <a href="#media">安装介质</a>
+      <a href="#howworks">工作原理</a>
+    </div>
+    <div class="sidebar-group">
+      <div class="sidebar-group-title">安装指南</div>
+      <a href="#single">单机安装</a>
+      <a href="#replicaset">副本集安装</a>
+    </div>
+    <div class="sidebar-group">
+      <div class="sidebar-group-title">参数参考</div>
+      <a href="#params-common">通用参数</a>
+      <a href="#params-cluster">集群参数</a>
+      <a href="#params-auth">认证参数</a>
+      <a href="#params-advanced">高级参数</a>
+    </div>
+    <div class="sidebar-group">
+      <div class="sidebar-group-title">版本兼容</div>
+      <a href="#compat-version">版本特性矩阵</a>
+      <a href="#compat-os">操作系统支持</a>
+    </div>
+    <div class="sidebar-group">
+      <div class="sidebar-group-title">其他</div>
+      <a href="#optimization">系统优化说明</a>
+      <a href="#troubleshoot">故障排查</a>
+      <a href="#faq">常见问题</a>
+      <a href="#changelog">更新日志</a>
+    </div>
+  </aside>
+
+  <main class="doc-content">
+
+<h2 id="quickstart">快速开始</h2>
+<p>MongoDBShellInstall 是一款 MongoDB 一键自动化安装脚本，支持 MongoDB 5.x 至 8.x 全版本，同时支持单机和副本集两种部署模式。脚本自动完成操作系统参数优化、MongoDB 解压安装（三包：server / mongosh / database-tools）、版本感知配置生成、WiredTiger 调优、systemd 服务创建及副本集远程部署全流程。</p>
+
+<h3>三步安装</h3>
+<ol>
+<li><strong>上传软件包</strong> - 将 <code>MongoDB.sh</code> 脚本和 MongoDB 离线安装包上传至服务器 <code>/soft</code> 目录</li>
+<li><strong>配置参数</strong> - 使用 <a href="generator.html">命令生成器</a> 或手动拼接安装参数</li>
+<li><strong>执行安装</strong> - 在 <code>/soft</code> 目录下以 <code>root</code> 用户执行</li>
+</ol>
+
+<div class="code-block">
+<div class="code-header"><span class="code-lang">Shell</span><button class="code-copy" onclick="copyCode(this)">复制</button></div>
+<div class="code-body"><span class="g">bash</span> MongoDB.sh <span class="p">-m</span> <span class="v">single</span>        <span class="c"># 单机模式，最简安装</span></div>
+</div>
+
+<div class="note"><strong>注意：</strong>脚本必须以 root 用户执行。Bash 版本需 >= 4。支持 RHEL/CentOS/Rocky/Alma/Debian/Ubuntu/SLES/Arch 等主流 Linux 发行版。</div>
+
+<h2 id="prepare">环境准备</h2>
+<h3>目录结构</h3>
+<p>将以下文件放置在 <code>/soft</code> 目录下：</p>
+<div class="code-block">
+<div class="code-header"><span class="code-lang">目录结构</span><button class="code-copy" onclick="copyCode(this)">复制</button></div>
+<div class="code-body">/soft/
+  MongoDB.sh                                    <span class="c"># 安装脚本</span>
+  mongodb-linux-x86_64-rhel80-8.0.9.tgz         <span class="c"># MongoDB Server 安装包</span>
+  mongosh-2.3.8-linux-x64.tgz                   <span class="c"># mongosh 安装包</span>
+  mongodb-database-tools-rhel80-x86_64-100.*.tgz <span class="c"># database-tools 安装包</span></div>
+</div>
+
+<h3>系统要求</h3>
+<ul>
+<li>支持的操作系统：RHEL/CentOS 7/8/9、Rocky/Alma 8/9、Ubuntu 18-24、Debian 10-13、SLES/openSUSE、Amazon Linux、Fedora、Arch Linux</li>
+<li>Bash 版本 >= 4，内存 >= 2GB（生产环境建议 >= 8GB）</li>
+<li>磁盘空间：MongoDB 安装约 500MB，数据目录建议使用 XFS 文件系统</li>
+<li>副本集模式：所有节点 root 密码一致，网络互通，仅在第一个节点执行脚本</li>
+</ul>
+
+<h3>离线安装包</h3>
+<p>MongoDB 离线安装需要三个独立的 tar.gz 包：</p>
+<ul>
+<li><code>mongodb-linux-x86_64-*.tgz</code> - MongoDB Server（包含 mongod）</li>
+<li><code>mongosh-*-linux-x64.tgz</code> - MongoDB Shell（交互式客户端）</li>
+<li><code>mongodb-database-tools-*.tgz</code> - 数据库工具（mongodump / mongorestore 等）</li>
+</ul>
+<div class="note"><strong>提示：</strong>脚本会自动识别这三个包并分别安装。请确保 Server 包的文件名不包含 "database-tools" 或 "mongosh" 关键字以避免误识别。</div>
+
+<h2 id="media">安装介质</h2>
+<p>脚本支持 MongoDB 5.x 至 8.x 全版本。将 <code>.tgz</code> 文件放置在 <code>/soft</code> 目录下，脚本启动后会自动识别版本并生成版本感知的配置文件。</p>
+
+<table class="doc-table">
+<thead><tr><th>MongoDB 版本</th><th>安装包文件名示例</th><th>版本特性</th></tr></thead>
+<tbody>
+<tr><td>8.0</td><td>mongodb-linux-x86_64-rhel80-8.0.9.tgz</td><td>TCMalloc，需启用 THP</td></tr>
+<tr><td>7.0</td><td>mongodb-linux-x86_64-rhel80-7.0.20.tgz</td><td>需禁用 THP</td></tr>
+<tr><td>6.0</td><td>mongodb-linux-x86_64-rhel80-6.0.x.tgz</td><td>6.2+ 移除 journal.enabled 选项</td></tr>
+<tr><td>5.0</td><td>mongodb-linux-x86_64-rhel80-5.0.x.tgz</td><td>enableMajorityReadConcern 始终开启</td></tr>
+</tbody>
+</table>
+
+<h2 id="howworks">工作原理</h2>
+<p>MongoDBShellInstall 脚本按照以下流程自动完成整个安装过程：</p>
+
+<h3>执行流程</h3>
+<ol>
+<li><strong>参数校验</strong> - 验证输入参数、节点 IP 格式和重复检测</li>
+<li><strong>安装确认</strong> - 显示安装摘要，等待用户确认</li>
+<li><strong>版本检测</strong> - 解析 MongoDB 安装包版本号，确定版本特性</li>
+<li><strong>OS 优化</strong> - 内核参数、limits、THP、NUMA、readahead、防火墙</li>
+<li><strong>用户创建</strong> - 创建 mongod 系统用户，配置目录权限</li>
+<li><strong>MongoDB 安装</strong> - 解压三个离线包，创建二进制符号链接</li>
+<li><strong>配置生成</strong> - 生成版本感知的 mongod.conf（WiredTiger 调优）</li>
+<li><strong>Systemd 服务</strong> - 创建服务文件，NUMA interleave 启动</li>
+<li><strong>启动服务</strong> - 启动 MongoDB 并验证 ping 响应</li>
+<li><strong>远程部署</strong> - （副本集模式）scp 同步到从节点，调整配置并启动</li>
+<li><strong>副本集初始化</strong> - rs.initiate、等待 PRIMARY 选举、创建管理员用户</li>
+</ol>
+
+<h2 id="single">单机安装</h2>
+<p>单机模式是最简单的部署方式，适用于开发测试及中小型数据存储场景。</p>
+
+<h3>最简安装</h3>
+<div class="code-block">
+<div class="code-header"><span class="code-lang">Shell</span><button class="code-copy" onclick="copyCode(this)">复制</button></div>
+<div class="code-body"><span class="g">bash</span> MongoDB.sh <span class="p">-m</span> <span class="v">single</span>              <span class="c"># 最简安装</span></div>
+</div>
+
+<h3>自定义安装</h3>
+<div class="code-block">
+<div class="code-header"><span class="code-lang">Shell</span><button class="code-copy" onclick="copyCode(this)">复制</button></div>
+<div class="code-body"><span class="g">bash</span> MongoDB.sh \
+  <span class="p">-m</span> <span class="v">single</span> \
+  <span class="p">-d</span> <span class="v">/data/mongodb</span> \                <span class="c"># 安装根目录</span>
+  <span class="p">-p</span> <span class="v">27018</span> \                       <span class="c"># MongoDB 端口</span>
+  <span class="p">--max-connections</span> <span class="v">20000</span> \         <span class="c"># 最大连接数</span>
+  <span class="p">--backup-days</span> <span class="v">14</span>                 <span class="c"># 备份保留 14 天</span></div>
+</div>
+
+<h3>带认证的单机安装</h3>
+<div class="code-block">
+<div class="code-header"><span class="code-lang">Shell</span><button class="code-copy" onclick="copyCode(this)">复制</button></div>
+<div class="code-body"><span class="g">bash</span> MongoDB.sh \
+  <span class="p">-m</span> <span class="v">single</span> \
+  <span class="p">--auth</span> \                          <span class="c"># 启用认证</span>
+  <span class="p">--admin-user</span> <span class="v">admin</span> \              <span class="c"># 管理员用户名</span>
+  <span class="p">--admin-pass</span> <span class="v">'SecurePass123'</span>     <span class="c"># 管理员密码</span></div>
+</div>
+
+<div class="note"><strong>说明：</strong>单机模式下数据存储在 <code>/mongodb/data</code> 目录，日志存储在 <code>/mongodb/logs</code> 目录。WiredTiger 缓存大小根据物理内存自动计算。</div>
+
+<h2 id="replicaset">副本集安装</h2>
+<p>副本集模式是 MongoDB 生产环境推荐的部署方式，提供数据冗余和自动故障转移能力。</p>
+
+<div class="note"><strong>前置条件：</strong>所有节点 root 密码必须一致，网络互通，脚本仅在第一个节点执行。节点数建议奇数（3/5/7）。</div>
+
+<h3>基础 3 节点副本集</h3>
+<div class="code-block">
+<div class="code-header"><span class="code-lang">Shell</span><button class="code-copy" onclick="copyCode(this)">复制</button></div>
+<div class="code-body"><span class="g">bash</span> MongoDB.sh \
+  <span class="p">-m</span> <span class="v">replicaset</span> \
+  <span class="p">-ri</span> <span class="v">192.168.1.11,192.168.1.12,192.168.1.13</span> \
+  <span class="p">-rp</span> <span class="v">'RootPass123'</span> \
+  <span class="p">--auth</span> \
+  <span class="p">--admin-pass</span> <span class="v">'MongoAdmin123'</span></div>
+</div>
+
+<h3>自定义副本集配置</h3>
+<div class="code-block">
+<div class="code-header"><span class="code-lang">Shell</span><button class="code-copy" onclick="copyCode(this)">复制</button></div>
+<div class="code-body"><span class="g">bash</span> MongoDB.sh \
+  <span class="p">-m</span> <span class="v">rs</span> \                           <span class="c"># rs 为 replicaset 简写</span>
+  <span class="p">-ri</span> <span class="v">192.168.1.11,192.168.1.12,192.168.1.13</span> \
+  <span class="p">-rp</span> <span class="v">'RootPass123'</span> \
+  <span class="p">-ss</span> <span class="v">22022</span> \                       <span class="c"># SSH 端口</span>
+  <span class="p">-d</span> <span class="v">/data/mongodb</span> \                <span class="c"># 安装根目录</span>
+  <span class="p">-p</span> <span class="v">27017</span> \                       <span class="c"># MongoDB 端口</span>
+  <span class="p">--repl-set</span> <span class="v">myRS</span> \                <span class="c"># 副本集名称</span>
+  <span class="p">--oplog-size</span> <span class="v">4096</span> \              <span class="c"># Oplog 大小 4GB</span>
+  <span class="p">--auth</span> \
+  <span class="p">--admin-pass</span> <span class="v">'MongoAdmin123'</span></div>
+</div>
+
+<h3>副本集安装流程</h3>
+<ol>
+<li>主节点完成 OS 优化 + MongoDB 三包安装 + 配置生成</li>
+<li>生成 keyFile（副本集内部认证）</li>
+<li>启动主节点 MongoDB</li>
+<li>scp 整个安装目录到从节点</li>
+<li>从节点调整配置（bindIp）并启动</li>
+<li>执行 rs.initiate 初始化副本集</li>
+<li>等待 PRIMARY 选举完成</li>
+<li>创建管理员用户（如启用 --auth）</li>
+</ol>
+
+<h2 id="params-common">通用参数</h2>
+
+<table class="doc-table">
+<thead><tr><th>参数</th><th>说明</th><th>默认值</th></tr></thead>
+<tbody>
+<tr><td>-h, --help</td><td>显示帮助信息</td><td>-</td></tr>
+<tr><td>-m, --mode</td><td>安装模式：single / replicaset（支持简写 si / rs）</td><td>交互选择</td></tr>
+<tr><td>-n, --hostname</td><td>主机名（单机直接使用；多节点作为前缀）</td><td>mongodb</td></tr>
+<tr><td>-p, --port</td><td>MongoDB 端口</td><td>27017</td></tr>
+<tr><td>-d, --dir</td><td>安装根目录</td><td>/mongodb</td></tr>
+<tr><td>-ou, --owner</td><td>系统用户名</td><td>mongod</td></tr>
+<tr><td>--os-only</td><td>仅配置操作系统，不安装 MongoDB</td><td>N</td></tr>
+<tr><td>--debug</td><td>开启调试模式</td><td>N</td></tr>
+<tr><td>--backup-days</td><td>备份保留天数</td><td>7</td></tr>
+</tbody>
+</table>
+
+<h2 id="params-cluster">集群参数</h2>
+<p>以下参数在副本集模式下使用：</p>
+
+<table class="doc-table">
+<thead><tr><th>参数</th><th>说明</th><th>默认值</th></tr></thead>
+<tbody>
+<tr><td>-ri, --remote-ips</td><td>副本集节点 IP（逗号分隔，包含本机 IP）</td><td>-</td></tr>
+<tr><td>-rp, --root-pass</td><td>远程节点 root 密码（副本集模式必填）</td><td>-</td></tr>
+<tr><td>-ss, --ssh-port</td><td>SSH 端口</td><td>22</td></tr>
+<tr><td>--repl-set</td><td>副本集名称</td><td>rs0</td></tr>
+<tr><td>--oplog-size</td><td>Oplog 大小（MB，0 表示自动计算）</td><td>0（自动）</td></tr>
+</tbody>
+</table>
+
+<div class="note"><strong>注意：</strong><code>-ri</code> 第一个 IP 为主节点（执行脚本的节点）。主机名自动使用 IP 后两段作为后缀（如 192.168.1.11 对应 <code>mongodb1011</code>）。</div>
+
+<h2 id="params-auth">认证参数</h2>
+
+<table class="doc-table">
+<thead><tr><th>参数</th><th>说明</th><th>默认值</th></tr></thead>
+<tbody>
+<tr><td>--auth</td><td>启用认证（副本集模式自动启用 keyFile 认证）</td><td>N</td></tr>
+<tr><td>--admin-user</td><td>管理员用户名</td><td>admin</td></tr>
+<tr><td>--admin-pass</td><td>管理员密码（启用认证时必填）</td><td>-</td></tr>
+</tbody>
+</table>
+
+<h2 id="params-advanced">高级参数</h2>
+
+<table class="doc-table">
+<thead><tr><th>参数</th><th>说明</th><th>默认值</th></tr></thead>
+<tbody>
+<tr><td>--max-connections</td><td>最大连接数</td><td>65536</td></tr>
+</tbody>
+</table>
+
+<h2 id="compat-version">版本特性矩阵</h2>
+<p>脚本会根据 MongoDB 版本自动调整配置，以下是版本差异说明：</p>
+
+<table class="doc-table">
+<thead><tr><th>配置项</th><th>MongoDB 5.0</th><th>MongoDB 6.0-6.1</th><th>MongoDB 6.2+</th><th>MongoDB 7.0</th><th>MongoDB 8.0+</th></tr></thead>
+<tbody>
+<tr><td>storage.journal.enabled</td><td>可配置</td><td>可配置</td><td>已移除（始终开启）</td><td>已移除</td><td>已移除</td></tr>
+<tr><td>enableMajorityReadConcern</td><td>始终开启，不可配置</td><td>同左</td><td>同左</td><td>同左</td><td>同左</td></tr>
+<tr><td>Transparent Huge Pages</td><td>禁用</td><td>禁用</td><td>禁用</td><td>禁用</td><td>启用（TCMalloc）</td></tr>
+<tr><td>tcmallocReleaseRate</td><td>-</td><td>-</td><td>-</td><td>-</td><td>5.0</td></tr>
+</tbody>
+</table>
+
+<h2 id="compat-os">操作系统支持</h2>
+
+<table class="doc-table">
+<thead><tr><th>发行版家族</th><th>支持的版本</th><th>包管理器</th></tr></thead>
+<tbody>
+<tr><td>RHEL/CentOS</td><td>7, 8, 9</td><td>yum / dnf</td></tr>
+<tr><td>Rocky/AlmaLinux</td><td>8, 9</td><td>dnf</td></tr>
+<tr><td>Ubuntu</td><td>18.04, 20.04, 22.04, 24.04</td><td>apt</td></tr>
+<tr><td>Debian</td><td>10, 11, 12, 13</td><td>apt</td></tr>
+<tr><td>openSUSE/SLES</td><td>12, 15</td><td>zypper</td></tr>
+<tr><td>Amazon Linux</td><td>2, 2023</td><td>yum / dnf</td></tr>
+<tr><td>Fedora</td><td>最新</td><td>dnf</td></tr>
+<tr><td>Arch Linux</td><td>最新</td><td>pacman</td></tr>
+</tbody>
+</table>
+
+<div class="note"><strong>提示：</strong>MongoDB 官方支持平台为 RHEL 8/9、Ubuntu 22.04/24.04、Debian 11/12、SLES 15、Amazon Linux 2023。其他发行版为社区支持，脚本已做适配但不保证所有功能。</div>
+
+<h2 id="optimization">系统优化说明</h2>
+<p>脚本会自动完成以下操作系统级优化（遵循 MongoDB 官方生产部署建议）：</p>
+<ul>
+<li><strong>vm.swappiness=1</strong> - 最小化 swap 使用</li>
+<li><strong>tcp_keepalive_time=120</strong> - MongoDB 推荐值</li>
+<li><strong>vm.max_map_count=262144</strong> - 支持大量映射文件</li>
+<li><strong>readahead=16KB</strong> - WiredTiger 推荐值（8-32 范围）</li>
+<li><strong>vm.zone_reclaim_mode=0</strong> - 禁用 NUMA zone reclaim</li>
+<li><strong>dirty_expire_centisecs=3000</strong> - 优化脏页过期时间</li>
+<li><strong>NUMA interleave</strong> - numactl --interleave=all 启动 mongod</li>
+<li><strong>THP 版本感知</strong> - MongoDB 8.0+ 启用 THP（TCMalloc），7.0- 禁用 THP</li>
+<li><strong>limits 配置</strong> - nofile 65535, nproc 65535, memlock unlimited, core unlimited</li>
+<li><strong>XFS 文件系统</strong> - 推荐使用 XFS 作为数据目录文件系统</li>
+</ul>
+
+<h2 id="troubleshoot">故障排查</h2>
+
+<h4>MongoDB 启动超时</h4>
+<ul>
+<li>查看日志：<code>journalctl -u mongod</code> 或 <code>/mongodb/logs/mongod.log</code></li>
+<li>检查 WiredTiger 缓存大小是否超出可用内存</li>
+<li>确认数据目录权限归 mongod 用户所有</li>
+<li>检查端口是否被占用：<code>ss -tlnp | grep 27017</code></li>
+</ul>
+
+<h4>副本集初始化失败</h4>
+<ul>
+<li>确认所有节点 MongoDB 已启动并可 ping 通</li>
+<li>检查所有节点的 <code>replSetName</code> 配置一致</li>
+<li>验证 keyFile 权限为 400 且内容一致</li>
+<li>确认节点间端口互通：<code>nc -zv peer_ip 27017</code></li>
+</ul>
+
+<h4>认证失败</h4>
+<ul>
+<li>确认使用 <code>--auth</code> 和 <code>--admin-pass</code> 参数</li>
+<li>连接时使用：<code>mongosh --host IP --port 27017 -u admin -p 'password' --authenticationDatabase admin</code></li>
+<li>副本集模式下 keyFile 路径和权限：<code>chmod 400 /mongodb/keyfile && chown mongod /mongodb/keyfile</code></li>
+</ul>
+
+<h4>版本配置不兼容</h4>
+<ul>
+<li>MongoDB 6.2+ 不支持 <code>storage.journal.enabled</code> 选项，脚本已自动处理</li>
+<li>MongoDB 8.0+ 需要启用 THP，脚本已自动检测版本并配置</li>
+<li>MongoDB 5.0+ 的 <code>enableMajorityReadConcern</code> 始终为 true，无需配置</li>
+</ul>
+
+<h2 id="faq">常见问题</h2>
+
+<h4>Q: 支持哪些 MongoDB 版本？</h4>
+<p>支持 MongoDB 5.x 至 8.x 全版本。脚本会根据版本自动调整配置参数（journal、THP、TCMalloc 等）。</p>
+
+<h4>Q: 为什么需要三个安装包？</h4>
+<p>从 MongoDB 4.4 开始，MongoDB 官方将 Server、mongosh 和 database-tools 拆分为独立发布包。脚本自动识别并安装这三个包。</p>
+
+<h4>Q: 是否支持离线安装？</h4>
+<p>支持。将三个 tar.gz 安装包上传至 <code>/soft</code> 目录即可，无需网络连接。系统依赖（numactl 等）需通过本地包源或提前安装。</p>
+
+<h4>Q: WiredTiger 缓存大小如何计算？</h4>
+<p>脚本按照 MongoDB 官方建议自动计算：<code>max(0.25GB, (totalRAM - 1GB) * 0.5)</code>。如物理内存 16GB 则缓存约 7.5GB。</p>
+
+<h4>Q: 为什么 MongoDB 8.0 要启用 THP？</h4>
+<p>MongoDB 8.0 将内存分配器切换为 Google TCMalloc（取代 jemalloc/glibc），TCMalloc 与 THP 配合可提升内存分配效率。7.0 及更早版本仍应禁用 THP。</p>
+
+<h4>Q: mongod 用户可以登录吗？</h4>
+<p>不可以。脚本创建的 mongod 用户 shell 为 <code>/sbin/nologin</code>，这是一个纯服务用户。MongoDB 通过 systemd（<code>User=mongod</code>）启动。</p>
+
+<h2 id="changelog">更新日志</h2>
+
+<h3>v1.0.0 (2026-04)</h3>
+<ul>
+<li>初始版本发布</li>
+<li>支持单机 / 副本集双模式部署</li>
+<li>MongoDB 5.x~8.x 全版本支持</li>
+<li>版本感知配置：6.2+ journal 移除、8.0+ THP/TCMalloc、5.0+ majorityReadConcern</li>
+<li>WiredTiger 调优：cacheSizeGB 自动计算、journalCompressor=snappy、blockCompressor=zstd</li>
+<li>三包离线安装：mongodb-server / mongosh / database-tools</li>
+<li>NUMA interleave 优化（numactl --interleave=all）</li>
+<li>THP 版本感知管理（8.0+ 启用，7.0- 禁用）</li>
+<li>PID 文件 + 端口双重进程检测</li>
+<li>keyFile 认证 + 管理员用户自动创建</li>
+<li>rs.initiate + PRIMARY 选举等待</li>
+<li>Systemd 服务管理</li>
+<li>mongodump 备份脚本（gzip 压缩、定时清理）</li>
+<li>健康检查监控脚本（ping / 副本集状态 / 连接数）</li>
+<li>多发行版支持：RHEL/Debian/SUSE/Arch 全家族</li>
+<li>集群远程部署（scp + SSH 自动配置）</li>
+</ul>
+
+  </main>
+</div>
+
+<button class="sidebar-toggle" id="sidebarToggle" onclick="document.getElementById('sidebar').classList.toggle('open')">☰</button>
+<div class="back-to-top" id="backToTop">
+  <svg class="btt-progress" viewBox="0 0 48 48"><circle cx="24" cy="24" r="20"></circle></svg>
+  <button class="btt-btn" aria-label="返回顶部">↑</button>
+</div>
+<div class="toast" id="toast">已复制到剪贴板</div>
+<script>
+const themeToggle = document.getElementById('themeToggle');
+const html = document.documentElement;
+const saved = localStorage.getItem('msi-theme');
+if (saved) { html.dataset.theme = saved; themeToggle.textContent = saved === 'dark' ? '☾' : '☀'; }
+themeToggle.addEventListener('click', () => {
+  const next = html.dataset.theme === 'dark' ? 'light' : 'dark';
+  html.dataset.theme = next;
+  localStorage.setItem('msi-theme', next);
+  themeToggle.textContent = next === 'dark' ? '☾' : '☀';
+});
+document.getElementById('mobileToggle').addEventListener('click', () => {
+  document.getElementById('navLinks').classList.toggle('open');
+});
+function copyCode(btn) {
+  const code = btn.closest('.code-block').querySelector('.code-body').innerText;
+  navigator.clipboard.writeText(code).then(() => {
+    const toast = document.getElementById('toast');
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 2000);
+    btn.textContent = '已复制';
+    setTimeout(() => btn.textContent = '复制', 2000);
+  });
+}
+const sections = document.querySelectorAll('.doc-content h2[id]');
+const sidebarLinks = document.querySelectorAll('.sidebar a');
+window.addEventListener('scroll', () => {
+  let current = '';
+  sections.forEach(s => {
+    if (window.scrollY >= s.offsetTop - 100) current = s.id;
+  });
+  sidebarLinks.forEach(a => {
+    a.classList.toggle('active', a.getAttribute('href') === '#' + current);
+  });
+});
+sidebarLinks.forEach(a => {
+  a.addEventListener('click', () => {
+    if (window.innerWidth <= 768) document.getElementById('sidebar').classList.remove('open');
+  });
+});
+const backToTop = document.getElementById('backToTop');
+const bttCircle = backToTop.querySelector('.btt-progress circle');
+const bttBtn = backToTop.querySelector('.btt-btn');
+const totalDash = 125.66;
+window.addEventListener('scroll', () => {
+  const scrollTop = window.scrollY;
+  const docHeight = document.documentElement.scrollHeight - window.innerHeight;
+  const scrollPercent = docHeight > 0 ? scrollTop / docHeight : 0;
+  bttCircle.style.strokeDashoffset = totalDash - (totalDash * scrollPercent);
+  backToTop.classList.toggle('visible', scrollTop > 300);
+});
+bttBtn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+document.querySelectorAll('.code-block .code-body').forEach(codeBody => {
+  const lines = codeBody.innerText.split('\n');
+  if (lines.length > 8) {
+    const block = codeBody.closest('.code-block');
+    block.classList.add('collapsible');
+    const overlay = document.createElement('div');
+    overlay.className = 'code-fold-overlay';
+    codeBody.style.position = 'relative';
+    codeBody.appendChild(overlay);
+    const btn = document.createElement('button');
+    btn.className = 'code-fold-btn';
+    btn.textContent = '展开全部 (' + lines.length + ' 行)';
+    btn.addEventListener('click', () => {
+      const expanded = block.classList.toggle('expanded');
+      btn.textContent = expanded ? '收起' : '展开全部 (' + lines.length + ' 行)';
+    });
+    codeBody.parentNode.insertBefore(btn, codeBody.nextSibling);
+  }
+});
+</script>
+</body>
+</html>

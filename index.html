@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MongoDBShellInstall - MongoDB 一键自动化安装</title>
+<meta name="description" content="MongoDB 一键自动化安装脚本，支持单机/副本集两种模式，MongoDB 5.x~8.x 全版本，离线安装。">
+<meta name="og:title" content="MongoDBShellInstall - MongoDB 一键自动化安装">
+<meta name="og:description" content="一键自动化安装 MongoDB，支持单机/副本集两种模式，版本感知配置优化，离线安装。">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='4' y='4' width='24' height='24' rx='4' fill='none' stroke='%2300684A' stroke-width='2.5'/><text x='16' y='22' text-anchor='middle' font-size='16' font-weight='bold' fill='%2300684A' font-family='monospace'>M</text></svg>">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+:root {
+  --mg-primary: #00684A;
+  --mg-primary-dark: #004D3A;
+  --mg-primary-light: #13AA52;
+  --mg-accent: #004D3A;
+  --mg-accent-light: #00684A;
+  --bg-primary: #fafbfc;
+  --bg-secondary: #f0f2f5;
+  --bg-card: #ffffff;
+  --bg-code: #1e2a3a;
+  --text-primary: #1a2332;
+  --text-secondary: #4a5568;
+  --text-muted: #8896a6;
+  --border-color: #e2e8f0;
+  --border-subtle: #edf2f7;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.07), 0 2px 4px rgba(0,0,0,0.04);
+  --shadow-lg: 0 12px 40px rgba(0,0,0,0.1), 0 4px 12px rgba(0,0,0,0.05);
+  --shadow-glow: 0 0 40px rgba(0,104,74,0.15);
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --font-display: 'DM Sans', 'Noto Sans SC', sans-serif;
+  --font-body: 'Noto Sans SC', 'DM Sans', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --nav-height: 64px;
+  --max-width: 1200px;
+  --transition-fast: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-smooth: 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+[data-theme="dark"] {
+  --bg-primary: #0f1923;
+  --bg-secondary: #162230;
+  --bg-card: #1a2d3d;
+  --bg-code: #0d1520;
+  --text-primary: #e8edf2;
+  --text-secondary: #a0b0c0;
+  --text-muted: #607080;
+  --border-color: #253545;
+  --border-subtle: #1e3040;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.2);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.25);
+  --shadow-lg: 0 12px 40px rgba(0,0,0,0.35);
+  --shadow-glow: 0 0 60px rgba(19,170,82,0.25);
+  --mg-primary-light: #3FC56B;
+}
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: var(--nav-height); }
+body { font-family: var(--font-body); background: var(--bg-primary); color: var(--text-primary); line-height: 1.7; -webkit-font-smoothing: antialiased; overflow-x: hidden; position: relative; }
+body::before { content: ''; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: radial-gradient(circle, rgba(0,104,74,0.04) 1px, transparent 1px); background-size: 24px 24px; pointer-events: none; z-index: 0; }
+body::after { content: ''; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); opacity: 0.03; pointer-events: none; z-index: 0; }
+[data-theme="dark"] body::before { background: radial-gradient(circle, rgba(19,170,82,0.035) 1px, transparent 1px); background-size: 24px 24px; }
+body > * { position: relative; z-index: 1; }
+a { color: var(--mg-primary-light); text-decoration: none; transition: color var(--transition-fast); }
+a:hover { color: var(--mg-primary); }
+.container { max-width: var(--max-width); margin: 0 auto; padding: 0 24px; }
+.nav { position: fixed; top: 0; left: 0; right: 0; z-index: 1000; height: var(--nav-height); background: rgba(250,251,252,0.85); backdrop-filter: blur(20px) saturate(180%); -webkit-backdrop-filter: blur(20px) saturate(180%); border-bottom: 1px solid var(--border-subtle); }
+[data-theme="dark"] .nav { background: rgba(15,25,35,0.88); }
+.nav-inner { max-width: var(--max-width); margin: 0 auto; padding: 0 24px; height: 100%; display: flex; align-items: center; justify-content: space-between; }
+.nav-brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; color: var(--text-primary); }
+.nav-brand-icon { width: 32px; height: 32px; background: linear-gradient(135deg, var(--mg-primary), var(--mg-primary-light)); border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; font-size: 18px; color: white; font-family: var(--font-mono); font-weight: 700; box-shadow: 0 2px 8px rgba(0,104,74,0.3); }
+.nav-brand span { font-family: var(--font-display); letter-spacing: -0.5px; }
+.nav-links { display: flex; align-items: center; gap: 6px; }
+.nav-links a { padding: 6px 14px; border-radius: var(--radius-sm); font-size: 14px; font-weight: 500; color: var(--text-secondary); transition: all var(--transition-fast); }
+.nav-links a:hover { color: var(--text-primary); background: var(--bg-secondary); }
+.nav-links a.active { color: var(--mg-primary); background: rgba(0,104,74,0.08); }
+.nav-right { display: flex; align-items: center; gap: 8px; }
+.theme-toggle { width: 36px; height: 36px; border-radius: var(--radius-sm); border: 1px solid var(--border-color); background: var(--bg-card); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 16px; transition: all var(--transition-fast); color: var(--text-secondary); }
+.theme-toggle:hover { border-color: var(--mg-primary); color: var(--mg-primary); }
+.nav-cta { padding: 7px 18px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 600; background: var(--mg-primary); color: white !important; transition: all var(--transition-fast); letter-spacing: 0.2px; }
+.nav-cta:hover { background: var(--mg-primary-dark); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,104,74,0.3); }
+.mobile-toggle { display: none; background: none; border: none; font-size: 22px; cursor: pointer; color: var(--text-primary); padding: 4px; }
+.hero { padding: 140px 0 80px; position: relative; overflow: hidden; }
+.hero::before { content: ''; position: absolute; top: -200px; right: -200px; width: 800px; height: 800px; background: radial-gradient(circle, rgba(0,104,74,0.09) 0%, rgba(0,104,74,0.03) 40%, transparent 70%); pointer-events: none; animation: heroGlow1 8s ease-in-out infinite alternate; }
+.hero::after { content: ''; position: absolute; bottom: -300px; left: -200px; width: 600px; height: 600px; background: radial-gradient(circle, rgba(0,77,58,0.07) 0%, rgba(0,77,58,0.02) 40%, transparent 70%); pointer-events: none; animation: heroGlow2 10s ease-in-out infinite alternate; }
+@keyframes heroGlow1 { 0% { transform: translate(0, 0) scale(1); opacity: 0.8; } 100% { transform: translate(-40px, 30px) scale(1.1); opacity: 1; } }
+@keyframes heroGlow2 { 0% { transform: translate(0, 0) scale(1); opacity: 0.7; } 100% { transform: translate(30px, -20px) scale(1.15); opacity: 1; } }
+.hero-inner::before { content: ''; position: absolute; top: 10%; right: -5%; width: 300px; height: 300px; border: 1px solid rgba(0,104,74,0.06); border-radius: 50%; pointer-events: none; animation: heroFloat 12s ease-in-out infinite; }
+.hero-inner::after { content: ''; position: absolute; bottom: -10%; left: 30%; width: 200px; height: 200px; border: 1px solid rgba(0,104,74,0.04); border-radius: 30% 70% 70% 30% / 30% 30% 70% 70%; pointer-events: none; animation: heroFloat 15s ease-in-out infinite reverse; }
+@keyframes heroFloat { 0%, 100% { transform: translateY(0) rotate(0deg); } 50% { transform: translateY(-20px) rotate(8deg); } }
+[data-theme="dark"] .hero::before { background: radial-gradient(circle, rgba(19,170,82,0.1) 0%, rgba(0,104,74,0.04) 40%, transparent 70%); }
+[data-theme="dark"] .hero::after { background: radial-gradient(circle, rgba(0,77,58,0.08) 0%, rgba(0,77,58,0.03) 40%, transparent 70%); }
+.hero-inner { position: relative; z-index: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 48px; align-items: center; }
+.hero-badge { display: inline-flex; align-items: center; gap: 8px; padding: 6px 16px 6px 8px; background: rgba(0,104,74,0.06); border: 1px solid rgba(0,104,74,0.12); border-radius: 100px; font-size: 13px; color: var(--mg-primary); font-weight: 500; margin-bottom: 28px; animation: fadeInUp 0.6s ease backwards; }
+.hero-badge-dot { width: 8px; height: 8px; background: var(--mg-accent-light); border-radius: 50%; animation: pulse 2s ease infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+.hero h1 { font-family: var(--font-display); font-size: clamp(36px, 5.5vw, 60px); font-weight: 700; line-height: 1.15; letter-spacing: -1.5px; margin-bottom: 24px; animation: fadeInUp 0.6s ease 0.1s backwards; }
+.hero h1 .highlight { background: linear-gradient(135deg, var(--mg-primary), var(--mg-primary-light)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+.hero-subtitle { font-size: 18px; color: var(--text-secondary); max-width: 620px; line-height: 1.8; margin-bottom: 40px; animation: fadeInUp 0.6s ease 0.2s backwards; }
+.hero-actions { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 56px; animation: fadeInUp 0.6s ease 0.3s backwards; }
+.btn { display: inline-flex; align-items: center; gap: 8px; padding: 12px 28px; border-radius: var(--radius-md); font-size: 15px; font-weight: 600; cursor: pointer; transition: all var(--transition-fast); border: none; font-family: var(--font-body); letter-spacing: 0.2px; }
+.btn-primary { background: linear-gradient(135deg, var(--mg-primary), var(--mg-primary-light)); color: white; box-shadow: 0 4px 16px rgba(0,104,74,0.3); }
+.btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,104,74,0.35); color: white; }
+.btn-outline { background: transparent; color: var(--text-primary); border: 1.5px solid var(--border-color); }
+.btn-outline:hover { border-color: var(--mg-primary); color: var(--mg-primary); }
+.hero-terminal { background: var(--bg-code); border-radius: 12px; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.25), 0 0 0 1px rgba(255,255,255,0.06); width: 100%; animation: fadeInUp 0.6s ease 0.4s backwards; }
+.terminal-bar { height: 38px; background: rgba(255,255,255,0.03); display: flex; align-items: center; padding: 0 14px; border-bottom: 1px solid rgba(255,255,255,0.06); position: relative; }
+.terminal-dots { display: flex; gap: 7px; z-index: 1; }
+.terminal-dot { width: 11px; height: 11px; border-radius: 50%; }
+.terminal-dot:nth-child(1) { background: #ff5f57; }
+.terminal-dot:nth-child(2) { background: #ffbd2e; }
+.terminal-dot:nth-child(3) { background: #28c840; }
+.terminal-title { position: absolute; left: 0; right: 0; text-align: center; font-size: 12px; color: rgba(255,255,255,0.3); font-family: var(--font-mono); pointer-events: none; }
+.terminal-body { padding: 18px 22px 28px; font-family: var(--font-mono); font-size: 13px; line-height: 1.8; min-height: 400px; max-height: 400px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.15) transparent; }
+.terminal-body .prompt { color: #28c840; }
+.terminal-body .cmd { color: #e8edf2; }
+.terminal-body .param { color: #5aafff; }
+.terminal-body .value { color: #ffd866; }
+.terminal-body .comment { color: #607080; font-style: italic; }
+.term-line { opacity: 0; transform: translateX(-6px); white-space: pre-wrap; word-break: break-all; transition: opacity 0.3s ease, transform 0.3s ease; }
+.term-line.visible { opacity: 1; transform: translateX(0); }
+.term-line .check { color: #28c840; }
+.term-line .task-name { color: #a0b0c0; }
+.term-line.success-msg { color: #28c840; font-weight: 600; }
+.term-line .success-msg { color: #28c840; font-weight: 600; }
+@keyframes termCursor { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+.term-cursor { display: inline-block; width: 8px; height: 15px; background: #28c840; vertical-align: middle; margin-left: 2px; animation: termCursor 1s step-end infinite; }
+.stats { padding: 20px 0 80px; }
+.stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px; background: var(--border-color); border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow-sm); }
+.stat-item { background: var(--bg-card); padding: 32px 24px; text-align: center; }
+.stat-number { font-family: var(--font-display); font-size: 36px; font-weight: 700; color: var(--mg-primary); letter-spacing: -1px; line-height: 1.2; }
+.stat-label { font-size: 14px; color: var(--text-muted); margin-top: 6px; font-weight: 400; }
+.section { padding: 80px 0; position: relative; }
+#quickstart { background: repeating-linear-gradient(0deg, transparent, transparent 60px, rgba(0,104,74,0.02) 60px, rgba(0,104,74,0.02) 61px), repeating-linear-gradient(90deg, transparent, transparent 80px, rgba(0,104,74,0.015) 80px, rgba(0,104,74,0.015) 81px); }
+[data-theme="dark"] #quickstart { background: repeating-linear-gradient(0deg, transparent, transparent 60px, rgba(19,170,82,0.025) 60px, rgba(19,170,82,0.025) 61px), repeating-linear-gradient(90deg, transparent, transparent 80px, rgba(19,170,82,0.018) 80px, rgba(19,170,82,0.018) 81px); }
+#features { position: relative; }
+#features::before { content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 800px; height: 600px; background: radial-gradient(ellipse, rgba(0,104,74,0.06) 0%, transparent 70%); pointer-events: none; }
+[data-theme="dark"] #features::before { background: radial-gradient(ellipse, rgba(19,170,82,0.07) 0%, transparent 70%); }
+#modes { background: repeating-linear-gradient(135deg, transparent, transparent 40px, rgba(0,104,74,0.012) 40px, rgba(0,104,74,0.012) 41px); }
+[data-theme="dark"] #modes { background: repeating-linear-gradient(135deg, transparent, transparent 40px, rgba(19,170,82,0.018) 40px, rgba(19,170,82,0.018) 41px); }
+.section-header { text-align: center; margin-bottom: 56px; }
+.section-eyebrow { font-family: var(--font-mono); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 2px; color: var(--mg-primary); margin-bottom: 12px; }
+.section-title { font-family: var(--font-display); font-size: clamp(26px, 3.5vw, 36px); font-weight: 700; letter-spacing: -0.8px; line-height: 1.3; }
+.section-desc { font-size: 16px; color: var(--text-secondary); max-width: 560px; margin: 16px auto 0; line-height: 1.7; }
+.steps-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+.step-card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 36px 28px; position: relative; transition: all var(--transition-smooth); }
+.step-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-md); border-color: rgba(0,104,74,0.2); }
+.step-number { width: 40px; height: 40px; border-radius: var(--radius-sm); background: linear-gradient(135deg, var(--mg-primary), var(--mg-primary-light)); color: white; display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 16px; font-weight: 700; margin-bottom: 20px; }
+.step-card h3 { font-size: 17px; font-weight: 600; margin-bottom: 10px; font-family: var(--font-display); }
+.step-card p { font-size: 14px; color: var(--text-secondary); line-height: 1.7; }
+.features-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.feature-card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 28px 22px; transition: all var(--transition-smooth); }
+.feature-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-md); border-color: rgba(0,104,74,0.2); }
+.feature-icon { width: 42px; height: 42px; border-radius: var(--radius-sm); background: rgba(0,104,74,0.07); display: flex; align-items: center; justify-content: center; font-size: 20px; margin-bottom: 16px; }
+.feature-card h3 { font-size: 15px; font-weight: 600; margin-bottom: 8px; }
+.feature-card p { font-size: 13px; color: var(--text-secondary); line-height: 1.65; }
+.modes-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+.mode-card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 36px 28px; transition: all var(--transition-smooth); position: relative; overflow: hidden; }
+.mode-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, var(--mg-primary), var(--mg-primary-light)); opacity: 0; transition: opacity var(--transition-fast); }
+.mode-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-md); }
+.mode-card:hover::before { opacity: 1; }
+.mode-icon { width: 48px; height: 48px; border-radius: var(--radius-md); background: rgba(0,104,74,0.07); display: flex; align-items: center; justify-content: center; font-size: 22px; margin-bottom: 20px; }
+.mode-card h3 { font-size: 18px; font-weight: 600; margin-bottom: 6px; }
+.mode-card .mode-sub { font-size: 13px; color: var(--text-muted); margin-bottom: 14px; font-family: var(--font-mono); }
+.mode-card p { font-size: 14px; color: var(--text-secondary); line-height: 1.7; margin-bottom: 16px; }
+.mode-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.mode-tag { padding: 3px 10px; border-radius: 100px; font-size: 12px; font-weight: 500; background: rgba(0,104,74,0.06); color: var(--mg-primary); border: 1px solid rgba(0,104,74,0.1); }
+.compat-section { background: radial-gradient(circle at 20% 50%, rgba(0,104,74,0.04) 0%, transparent 50%), radial-gradient(circle at 80% 50%, rgba(0,77,58,0.03) 0%, transparent 50%), var(--bg-secondary); border-radius: var(--radius-xl); padding: 56px; position: relative; overflow: hidden; }
+.compat-section::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); opacity: 0.03; pointer-events: none; border-radius: var(--radius-xl); }
+[data-theme="dark"] .compat-section { background: radial-gradient(circle at 20% 50%, rgba(19,170,82,0.05) 0%, transparent 50%), radial-gradient(circle at 80% 50%, rgba(0,77,58,0.04) 0%, transparent 50%), var(--bg-secondary); }
+.compat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; }
+.compat-group h3 { font-size: 15px; font-weight: 600; margin-bottom: 16px; color: var(--text-secondary); }
+.compat-tags { display: flex; flex-wrap: wrap; gap: 8px; }
+.compat-tag { padding: 8px 16px; border-radius: var(--radius-sm); background: var(--bg-card); border: 1px solid var(--border-color); font-size: 13px; font-weight: 500; color: var(--text-primary); transition: all var(--transition-fast); }
+.compat-tag:hover { border-color: var(--mg-primary); color: var(--mg-primary); transform: translateY(-1px); }
+.compat-tag.highlight { background: linear-gradient(135deg, var(--mg-primary), var(--mg-primary-light)); color: white; border-color: transparent; }
+.cta-section { text-align: center; padding: 80px 0; position: relative; }
+.cta-section::before { content: ''; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 600px; height: 400px; background: radial-gradient(ellipse, rgba(0,104,74,0.08) 0%, transparent 70%); pointer-events: none; }
+.cta-box { background: linear-gradient(135deg, var(--mg-primary), var(--mg-primary-dark)); border-radius: var(--radius-xl); padding: 64px 48px; position: relative; overflow: hidden; }
+.cta-box::before { content: ''; position: absolute; top: -50%; right: -20%; width: 500px; height: 500px; background: radial-gradient(circle, rgba(255,255,255,0.08), transparent 70%); pointer-events: none; }
+.cta-box h2 { font-family: var(--font-display); font-size: 28px; font-weight: 700; color: white; margin-bottom: 16px; position: relative; }
+.cta-box p { color: rgba(255,255,255,0.75); font-size: 16px; margin-bottom: 32px; position: relative; }
+.cta-actions { display: flex; gap: 14px; justify-content: center; position: relative; }
+.btn-white { background: white; color: var(--mg-primary); font-weight: 600; padding: 12px 28px; border-radius: var(--radius-md); font-size: 15px; cursor: pointer; transition: all var(--transition-fast); border: none; font-family: var(--font-body); }
+.btn-white:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.2); color: var(--mg-primary); }
+.btn-ghost { background: rgba(255,255,255,0.12); color: white; border: 1px solid rgba(255,255,255,0.25); padding: 12px 28px; border-radius: var(--radius-md); font-size: 15px; cursor: pointer; transition: all var(--transition-fast); font-family: var(--font-body); font-weight: 600; }
+.btn-ghost:hover { background: rgba(255,255,255,0.2); color: white; }
+.footer { border-top: none; padding: 56px 0 32px; position: relative; }
+.footer::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--mg-primary-light), var(--mg-primary), var(--mg-primary-light), transparent); opacity: 0.3; }
+.footer-grid { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 40px; margin-bottom: 40px; }
+.footer-brand h3 { font-size: 16px; font-weight: 700; margin-bottom: 12px; font-family: var(--font-display); }
+.footer-brand p { font-size: 13px; color: var(--text-muted); line-height: 1.7; max-width: 280px; }
+.footer-col h4 { font-size: 13px; font-weight: 600; margin-bottom: 14px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); }
+.footer-col a { display: block; font-size: 14px; color: var(--text-secondary); margin-bottom: 10px; transition: color var(--transition-fast); }
+.footer-col a:hover { color: var(--mg-primary); }
+.footer-bottom { padding-top: 24px; border-top: 1px solid var(--border-subtle); display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: var(--text-muted); }
+.back-to-top { position: fixed; bottom: 28px; right: 28px; z-index: 999; width: 48px; height: 48px; opacity: 0; pointer-events: none; transition: all 0.3s ease; }
+.back-to-top.visible { opacity: 1; pointer-events: auto; }
+.back-to-top:hover { transform: translateY(-3px); }
+.btt-progress { position: absolute; top: 0; left: 0; width: 48px; height: 48px; transform: rotate(-90deg); }
+.btt-progress circle { fill: none; stroke: var(--mg-primary); stroke-width: 2.5; stroke-dasharray: 125.66; stroke-dashoffset: 125.66; stroke-linecap: round; transition: stroke-dashoffset 0.1s linear; }
+.btt-btn { position: absolute; top: 4px; left: 4px; width: 40px; height: 40px; border-radius: 50%; border: none; background: var(--bg-card); color: var(--mg-primary); font-size: 18px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow-md); transition: all 0.2s ease; border: 1px solid var(--border-color); }
+.btt-btn:hover { background: var(--mg-primary); color: #fff; }
+@keyframes fadeInUp { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } }
+.animate-on-scroll { opacity: 0; transform: translateY(24px); transition: opacity 0.6s ease, transform 0.6s ease; }
+.animate-on-scroll.visible { opacity: 1; transform: translateY(0); }
+@media (max-width: 1024px) { .features-grid { grid-template-columns: repeat(2, 1fr); } .footer-grid { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 768px) { .nav-links { display: none; } .mobile-toggle { display: block; } .nav-links.open { display: flex; flex-direction: column; position: absolute; top: var(--nav-height); left: 0; right: 0; background: var(--bg-card); border-bottom: 1px solid var(--border-color); padding: 16px 24px; gap: 4px; box-shadow: var(--shadow-md); } .stats-grid { grid-template-columns: repeat(2, 1fr); } .steps-grid { grid-template-columns: 1fr; } .features-grid { grid-template-columns: 1fr; } .modes-grid { grid-template-columns: 1fr; } .compat-grid { grid-template-columns: 1fr; } .compat-section { padding: 32px 20px; } .hero { padding: 110px 0 60px; } .hero-inner { grid-template-columns: 1fr; } .hero h1 { font-size: 32px; letter-spacing: -0.8px; } .footer-grid { grid-template-columns: 1fr; } .footer-bottom { flex-direction: column; gap: 8px; text-align: center; } .cta-box { padding: 40px 24px; } }
+</style>
+</head>
+<body>
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="index.html" class="nav-brand">
+      <div class="nav-brand-icon">M</div>
+      <span>MongoDBShellInstall</span>
+    </a>
+    <div class="nav-links" id="navLinks">
+      <a href="index.html" class="active">首页</a>
+      <a href="generator.html">命令生成器</a>
+      <a href="docs.html">使用文档</a>
+    </div>
+    <div class="nav-right">
+      <button class="theme-toggle" id="themeToggle" title="切换主题">☀</button>
+      <a href="generator.html" class="nav-cta">开始使用</a>
+      <button class="mobile-toggle" id="mobileToggle">☰</button>
+    </div>
+  </div>
+</nav>
+
+<section class="hero">
+  <div class="container hero-inner">
+    <div class="hero-text">
+      <div class="hero-badge">
+        <span class="hero-badge-dot"></span>
+        一键安装 · 生产就绪
+      </div>
+      <h1>MongoDB<br><span class="highlight">一键自动化安装</span></h1>
+      <p class="hero-subtitle">
+        支持 <strong>单机 / 副本集</strong> 两种部署模式，<strong>MongoDB 5.x ~ 8.x</strong> 全版本。WiredTiger 版本感知调优，THP 智能管理，NUMA 优化，离线三包安装。支持 RHEL/CentOS/Rocky/Alma/Debian/Ubuntu 等多发行版。
+      </p>
+      <div class="hero-actions">
+        <a href="generator.html" class="btn btn-primary">命令生成器 →</a>
+        <a href="docs.html" class="btn btn-outline">查看文档</a>
+      </div>
+    </div>
+    <div class="hero-terminal">
+      <div class="terminal-bar">
+        <div class="terminal-dots"><span class="terminal-dot"></span><span class="terminal-dot"></span><span class="terminal-dot"></span></div>
+        <span class="terminal-title">root@msi:/soft</span>
+      </div>
+      <div class="terminal-body" id="termDemo"></div>
+    </div>
+  </div>
+</section>
+
+<section class="stats">
+  <div class="container">
+    <div class="stats-grid animate-on-scroll">
+      <div class="stat-item">
+        <div class="stat-number" data-target="2" data-suffix=" 种模式">0</div>
+        <div class="stat-label">单机 / 副本集</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-number">MongoDB 5~8</div>
+        <div class="stat-label">全版本支持</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-number">10+ 发行版</div>
+        <div class="stat-label">主流 Linux 支持</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-number">离线安装</div>
+        <div class="stat-label">三包零依赖部署</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="quickstart">
+  <div class="container">
+    <div class="section-header animate-on-scroll">
+      <div class="section-eyebrow">快速上手</div>
+      <h2 class="section-title">三步完成安装</h2>
+    </div>
+    <div class="steps-grid">
+      <div class="step-card animate-on-scroll">
+        <div class="step-number">1</div>
+        <h3>上传软件包</h3>
+        <p>将脚本和 MongoDB 三个离线包（mongodb-server、mongosh、database-tools）上传至服务器 /soft 目录</p>
+      </div>
+      <div class="step-card animate-on-scroll">
+        <div class="step-number">2</div>
+        <h3>配置参数</h3>
+        <p>使用在线命令生成器选择安装模式（单机/副本集）并配置安装参数</p>
+      </div>
+      <div class="step-card animate-on-scroll">
+        <div class="step-number">3</div>
+        <h3>执行命令</h3>
+        <p>复制生成的命令，以 root 用户在服务器上执行即可</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="features" style="background: var(--bg-secondary);">
+  <div class="container">
+    <div class="section-header animate-on-scroll">
+      <div class="section-eyebrow">核心特性</div>
+      <h2 class="section-title">为什么选择 MongoDBShellInstall</h2>
+      <p class="section-desc">经过多版本生产环境验证，专为运维工程师打造的 MongoDB 自动化安装方案</p>
+    </div>
+    <div class="features-grid">
+      <div class="feature-card animate-on-scroll">
+        <div class="feature-icon">⚡</div>
+        <h3>版本感知配置</h3>
+        <p>根据 MongoDB 版本自动适配配置：6.2+ 移除 journal.enabled，5.0+ 移除 enableMajorityReadConcern，8.0+ 启用 TCMalloc THP</p>
+      </div>
+      <div class="feature-card animate-on-scroll">
+        <div class="feature-icon">🔧</div>
+        <h3>WiredTiger 智能调优</h3>
+        <p>根据物理内存自动计算 cacheSizeGB，配置 journalCompressor=snappy，blockCompressor=zstd，directoryForIndexes</p>
+      </div>
+      <div class="feature-card animate-on-scroll">
+        <div class="feature-icon">📦</div>
+        <h3>OS 深度优化</h3>
+        <p>tcp_keepalive_time、vm.swappiness=1、readahead=16KB、NUMA interleave、THP 版本感知管理，官方生产标准</p>
+      </div>
+      <div class="feature-card animate-on-scroll">
+        <div class="feature-icon">🎯</div>
+        <h3>离线三包安装</h3>
+        <p>支持 mongodb-server、mongosh、database-tools 三个独立离线包，自动识别版本，无需网络连接</p>
+      </div>
+      <div class="feature-card animate-on-scroll">
+        <div class="feature-icon">🛡</div>
+        <h3>副本集自动化</h3>
+        <p>keyFile 认证、rs.initiate 自动执行、PRIMARY 选举等待、管理员用户创建，副本集开箱即用</p>
+      </div>
+      <div class="feature-card animate-on-scroll">
+        <div class="feature-icon">📄</div>
+        <h3>备份与监控脚本</h3>
+        <p>自动生成 mongodump 备份脚本（gzip 压缩）、健康检查脚本（PID / 连接数 / 副本集状态），运维无忧</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="modes">
+  <div class="container">
+    <div class="section-header animate-on-scroll">
+      <div class="section-eyebrow">部署模式</div>
+      <h2 class="section-title">两种模式，灵活适配</h2>
+      <p class="section-desc">根据业务场景选择最合适的部署模式</p>
+    </div>
+    <div class="modes-grid">
+      <div class="mode-card animate-on-scroll">
+        <div class="mode-icon">⚙</div>
+        <h3>单机模式</h3>
+        <div class="mode-sub">Standalone</div>
+        <p>单节点 MongoDB 部署，适用于开发测试和中小型数据存储场景。支持认证可选开启</p>
+        <div class="mode-tags">
+          <span class="mode-tag">快速部署</span>
+          <span class="mode-tag">开发测试</span>
+          <span class="mode-tag">中小数据</span>
+        </div>
+      </div>
+      <div class="mode-card animate-on-scroll">
+        <div class="mode-icon">🔰</div>
+        <h3>副本集模式</h3>
+        <div class="mode-sub">Replica Set</div>
+        <p>多节点副本集集群，自动选举 PRIMARY 节点。推荐 3+ 节点（奇数），支持 keyFile 认证和管理员用户自动创建</p>
+        <div class="mode-tags">
+          <span class="mode-tag">高可用</span>
+          <span class="mode-tag">自动故障转移</span>
+          <span class="mode-tag">生产推荐</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="compat">
+  <div class="container">
+    <div class="section-header animate-on-scroll">
+      <div class="section-eyebrow">兼容性</div>
+      <h2 class="section-title">广泛的版本与系统支持</h2>
+    </div>
+    <div class="compat-section animate-on-scroll">
+      <div class="compat-grid">
+        <div class="compat-group">
+          <h3>支持的 MongoDB 版本</h3>
+          <div class="compat-tags">
+            <span class="compat-tag highlight">MongoDB 8.0</span>
+            <span class="compat-tag highlight">MongoDB 7.0</span>
+            <span class="compat-tag">MongoDB 6.0</span>
+            <span class="compat-tag">MongoDB 5.0</span>
+          </div>
+        </div>
+        <div class="compat-group">
+          <h3>支持的操作系统</h3>
+          <div class="compat-tags">
+            <span class="compat-tag">RHEL/CentOS 7/8/9</span>
+            <span class="compat-tag">Rocky/Alma 8/9</span>
+            <span class="compat-tag">Ubuntu 18-24</span>
+            <span class="compat-tag">Debian 10-13</span>
+            <span class="compat-tag">SLES/openSUSE</span>
+            <span class="compat-tag">Amazon Linux</span>
+          </div>
+        </div>
+        <div class="compat-group">
+          <h3>离线安装包</h3>
+          <div class="compat-tags">
+            <span class="compat-tag highlight">mongodb-server</span>
+            <span class="compat-tag highlight">mongosh</span>
+            <span class="compat-tag highlight">database-tools</span>
+          </div>
+        </div>
+        <div class="compat-group">
+          <h3>存储引擎</h3>
+          <div class="compat-tags">
+            <span class="compat-tag highlight">WiredTiger</span>
+            <span class="compat-tag">Snappy / Zstd 压缩</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="cta-section">
+  <div class="container">
+    <div class="cta-box animate-on-scroll">
+      <h2>开始使用 MongoDBShellInstall</h2>
+      <p>通过在线命令生成器配置参数，一键生成可执行的安装命令</p>
+      <div class="cta-actions">
+        <a href="generator.html" class="btn-white">打开命令生成器 →</a>
+        <a href="docs.html" class="btn-ghost">阅读使用文档</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="container">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <h3>MongoDBShellInstall</h3>
+        <p>MongoDB 一键自动化安装脚本，支持单机/副本集两种部署模式，覆盖 MongoDB 5.x~8.x 全版本。</p>
+      </div>
+      <div class="footer-col">
+        <h4>快速导航</h4>
+        <a href="index.html">首页</a>
+        <a href="generator.html">命令生成器</a>
+        <a href="docs.html">使用文档</a>
+      </div>
+      <div class="footer-col">
+        <h4>支持版本</h4>
+        <a href="docs.html">MongoDB 8.0</a>
+        <a href="docs.html">MongoDB 7.0</a>
+        <a href="docs.html">MongoDB 6.0 / 5.0</a>
+      </div>
+      <div class="footer-col">
+        <h4>部署模式</h4>
+        <a href="docs.html">单机 Standalone</a>
+        <a href="docs.html">副本集 Replica Set</a>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>Copyright &copy; 2024-2026 MongoDBShellInstall</span>
+      <span>MongoDB 一键自动化安装</span>
+    </div>
+  </div>
+</footer>
+
+<div class="back-to-top" id="backToTop">
+  <svg class="btt-progress" viewBox="0 0 48 48"><circle cx="24" cy="24" r="20"></circle></svg>
+  <button class="btt-btn" aria-label="返回顶部">↑</button>
+</div>
+<script>
+const themeToggle = document.getElementById('themeToggle');
+const html = document.documentElement;
+const saved = localStorage.getItem('msi-theme');
+if (saved) { html.dataset.theme = saved; themeToggle.textContent = saved === 'dark' ? '☾' : '☀'; }
+themeToggle.addEventListener('click', () => {
+  const next = html.dataset.theme === 'dark' ? 'light' : 'dark';
+  html.dataset.theme = next;
+  localStorage.setItem('msi-theme', next);
+  themeToggle.textContent = next === 'dark' ? '☾' : '☀';
+});
+document.getElementById('mobileToggle').addEventListener('click', () => {
+  document.getElementById('navLinks').classList.toggle('open');
+});
+const backToTop = document.getElementById('backToTop');
+const bttCircle = backToTop.querySelector('.btt-progress circle');
+const bttBtn = backToTop.querySelector('.btt-btn');
+const totalDash = 125.66;
+window.addEventListener('scroll', () => {
+  const scrollTop = window.scrollY;
+  const docHeight = document.documentElement.scrollHeight - window.innerHeight;
+  const scrollPercent = docHeight > 0 ? scrollTop / docHeight : 0;
+  bttCircle.style.strokeDashoffset = totalDash - (totalDash * scrollPercent);
+  backToTop.classList.toggle('visible', scrollTop > 300);
+});
+bttBtn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach((e, i) => {
+    if (e.isIntersecting) {
+      setTimeout(() => e.target.classList.add('visible'), i * 80);
+      observer.unobserve(e.target);
+    }
+  });
+}, { threshold: 0.1 });
+document.querySelectorAll('.animate-on-scroll').forEach(el => observer.observe(el));
+const statsObserver = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      const statNumbers = entry.target.querySelectorAll('.stat-number[data-target]');
+      statNumbers.forEach(el => {
+        const target = parseInt(el.dataset.target, 10);
+        const suffix = el.dataset.suffix || '';
+        const duration = 1500;
+        const startTime = performance.now();
+        function easeOutQuart(t) { return 1 - Math.pow(1 - t, 4); }
+        function animate(now) {
+          const elapsed = now - startTime;
+          const progress = Math.min(elapsed / duration, 1);
+          const current = Math.round(easeOutQuart(progress) * target);
+          el.textContent = current + suffix;
+          if (progress < 1) requestAnimationFrame(animate);
+        }
+        requestAnimationFrame(animate);
+      });
+      statsObserver.unobserve(entry.target);
+    }
+  });
+}, { threshold: 0.2 });
+const statsGrid = document.querySelector('.stats-grid');
+if (statsGrid) statsObserver.observe(statsGrid);
+
+(function() {
+  var term = document.getElementById('termDemo');
+  if (!term) return;
+  var lines = [
+    { html: '<span class="prompt">$ </span><span class="cmd">bash MongoDB.sh <span class="param">-m</span> <span class="value">rs</span> <span class="param">-ri</span> <span class="value">10.0.1.1,10.0.1.2,10.0.1.3</span> <span class="param">-rp</span> <span class="value">\'RootPass\'</span> <span class="param">--auth</span> <span class="param">--admin-pass</span> <span class="value">\'Mongo123\'</span></span>', delay: 600 },
+    { html: '&nbsp;', delay: 400 },
+    { html: '<span class="check">✓</span> <span class="task-name">检测 MongoDB 版本 (8.0.9)</span>', delay: 280 },
+    { html: '<span class="check">✓</span> <span class="task-name">确定部署模式 (Replica Set)</span>', delay: 220 },
+    { html: '<span class="check">✓</span> <span class="task-name">安装系统依赖包</span>', delay: 220 },
+    { html: '<span class="check">✓</span> <span class="task-name">优化内核参数 (THP/NUMA/sysctl)</span>', delay: 220 },
+    { html: '<span class="check">✓</span> <span class="task-name">创建用户和目录</span>', delay: 220 },
+    { html: '<span class="check">✓</span> <span class="task-name">安装 MongoDB Server</span>', delay: 280 },
+    { html: '<span class="check">✓</span> <span class="task-name">安装 mongosh</span>', delay: 220 },
+    { html: '<span class="check">✓</span> <span class="task-name">安装 database-tools</span>', delay: 220 },
+    { html: '<span class="check">✓</span> <span class="task-name">生成 mongod.conf (WiredTiger 调优)</span>', delay: 250 },
+    { html: '<span class="check">✓</span> <span class="task-name">生成 keyFile 认证</span>', delay: 220 },
+    { html: '<span class="check">✓</span> <span class="task-name">创建 systemd 服务</span>', delay: 220 },
+    { html: '<span class="check">✓</span> <span class="task-name">启动 MongoDB 服务</span>', delay: 300 },
+    { html: '<span class="check">✓</span> <span class="task-name">分发并安装远程节点</span>', delay: 350 },
+    { html: '<span class="check">✓</span> <span class="task-name">初始化副本集 (rs.initiate)</span>', delay: 400 },
+    { html: '<span class="check">✓</span> <span class="task-name">等待 PRIMARY 选举完成</span>', delay: 350 },
+    { html: '<span class="check">✓</span> <span class="task-name">创建管理员用户</span>', delay: 280 },
+    { html: '&nbsp;', delay: 300 },
+    { html: '<span class="check" style="font-size:14px">◆</span> <span class="success-msg">MongoDB 副本集安装成功！节点数: 3/3</span>', delay: 500 },
+    { html: '<span class="prompt">$ </span><span class="term-cursor"></span>', delay: 0 },
+  ];
+  var idx = 0;
+  function showNext() {
+    if (idx >= lines.length) return;
+    var line = lines[idx];
+    var div = document.createElement('div');
+    div.className = 'term-line';
+    div.innerHTML = line.html;
+    term.appendChild(div);
+    void div.offsetWidth;
+    div.classList.add('visible');
+    requestAnimationFrame(function() {
+      requestAnimationFrame(function() { term.scrollTop = term.scrollHeight; });
+    });
+    idx++;
+    if (idx < lines.length) setTimeout(showNext, lines[idx - 1].delay);
+  }
+  setTimeout(showNext, 800);
+})();
+</script>
+</body>
+</html>

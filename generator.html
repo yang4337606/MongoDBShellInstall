@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>命令生成器 - MongoDBShellInstall</title>
+<meta name="description" content="MongoDBShellInstall 在线命令生成器，可视化配置参数，一键生成 MongoDB 安装命令。">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%2300684A'/><text x='16' y='23' text-anchor='middle' fill='white' font-size='20' font-weight='bold' font-family='monospace'>M</text></svg>">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;600;700&family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+:root{--mg-primary:#00684A;--mg-dark:#004D3A;--mg-light:#13AA52;--bg-primary:#fafbfc;--bg-secondary:#f0f2f5;--bg-card:#fff;--bg-code:#1e2a3a;--text-primary:#1a2332;--text-secondary:#4a5568;--text-muted:#8896a6;--border-color:#e2e8f0;--border-subtle:#edf2f7;--shadow-sm:0 1px 3px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04);--shadow-md:0 4px 12px rgba(0,0,0,.07),0 2px 4px rgba(0,0,0,.04);--shadow-lg:0 12px 40px rgba(0,0,0,.1),0 4px 12px rgba(0,0,0,.05);--radius-sm:6px;--radius-md:10px;--radius-lg:16px;--radius-xl:24px;--font-display:'DM Sans','Noto Sans SC',sans-serif;--font-body:'Noto Sans SC','DM Sans',sans-serif;--font-mono:'JetBrains Mono',monospace;--nav-height:64px;--max-width:1200px;--transition-fast:.2s cubic-bezier(.4,0,.2,1);--transition-smooth:.4s cubic-bezier(.22,1,.36,1)}
+[data-theme="dark"]{--bg-primary:#0f1923;--bg-secondary:#162230;--bg-card:#1a2d3d;--bg-code:#0d1520;--text-primary:#e8edf2;--text-secondary:#a0b0c0;--text-muted:#607080;--border-color:#253545;--border-subtle:#1e3040;--shadow-sm:0 1px 3px rgba(0,0,0,.2);--shadow-md:0 4px 12px rgba(0,0,0,.25);--shadow-lg:0 12px 40px rgba(0,0,0,.35);--mg-light:#3FC56B}
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:var(--nav-height)}body{font-family:var(--font-body);background:var(--bg-primary);color:var(--text-primary);line-height:1.7;-webkit-font-smoothing:antialiased;overflow-x:hidden;background-image:radial-gradient(circle,rgba(0,104,74,.04) 1px,transparent 1px);background-size:24px 24px;position:relative}
+body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9998;opacity:.03;filter:url(#noiseFilter)}
+[data-theme="dark"] body::before{opacity:.045}
+[data-theme="dark"] body{background-image:radial-gradient(circle,rgba(0,104,74,.05) 1px,transparent 1px)}a{color:var(--mg-light);text-decoration:none;transition:color var(--transition-fast)}
+.container{max-width:var(--max-width);margin:0 auto;padding:0 24px}
+.nav{position:fixed;top:0;left:0;right:0;z-index:1000;height:var(--nav-height);background:rgba(250,251,252,.85);backdrop-filter:blur(20px) saturate(180%);-webkit-backdrop-filter:blur(20px) saturate(180%);border-bottom:1px solid var(--border-subtle)}
+[data-theme="dark"] .nav{background:rgba(15,25,35,.88)}
+.nav-inner{max-width:var(--max-width);margin:0 auto;padding:0 24px;height:100%;display:flex;align-items:center;justify-content:space-between}
+.nav-brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:16px;color:var(--text-primary)}
+.nav-brand-icon{width:32px;height:32px;background:linear-gradient(135deg,var(--mg-primary),var(--mg-light));border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;font-size:18px;color:#fff;font-family:var(--font-mono);font-weight:700;box-shadow:0 2px 8px rgba(0,104,74,.3)}
+.nav-brand span{font-family:var(--font-display);letter-spacing:-.5px}
+.nav-links{display:flex;align-items:center;gap:6px}
+.nav-links a{padding:6px 14px;border-radius:var(--radius-sm);font-size:14px;font-weight:500;color:var(--text-secondary);transition:all var(--transition-fast)}
+.nav-links a:hover{color:var(--text-primary);background:var(--bg-secondary)}
+.nav-links a.active{color:var(--mg-primary);background:rgba(0,104,74,.08)}
+.nav-right{display:flex;align-items:center;gap:8px}
+.theme-toggle{width:36px;height:36px;border-radius:var(--radius-sm);border:1px solid var(--border-color);background:var(--bg-card);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:16px;transition:all var(--transition-fast);color:var(--text-secondary)}
+.theme-toggle:hover{border-color:var(--mg-primary);color:var(--mg-primary)}
+.nav-cta{padding:7px 18px;border-radius:var(--radius-sm);font-size:13px;font-weight:600;background:var(--mg-primary);color:#fff!important;transition:all var(--transition-fast)}
+.nav-cta:hover{background:var(--mg-dark);transform:translateY(-1px)}
+.mobile-toggle{display:none;background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-primary);padding:4px}
+.page-header{padding:110px 0 40px;text-align:center;position:relative}
+.page-header::before{content:'';position:absolute;top:50%;left:50%;width:480px;height:480px;transform:translate(-50%,-50%);background:radial-gradient(circle,rgba(0,104,74,.07) 0%,transparent 70%);pointer-events:none;z-index:0}
+[data-theme="dark"] .page-header::before{background:radial-gradient(circle,rgba(0,104,74,.12) 0%,transparent 70%)}
+.page-header .container{position:relative;z-index:1}
+.page-header h1{font-family:var(--font-display);font-size:clamp(26px,4vw,36px);font-weight:700;letter-spacing:-.8px;margin-bottom:12px}
+.page-header p{font-size:16px;color:var(--text-secondary);max-width:540px;margin:0 auto}
+.mode-selector{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-bottom:40px}
+.mode-option{background:var(--bg-card);border:2px solid var(--border-color);border-radius:var(--radius-lg);padding:24px 20px;cursor:pointer;transition:all var(--transition-fast);text-align:center;position:relative}
+.mode-option:hover{border-color:var(--mg-light);transform:translateY(-2px);box-shadow:var(--shadow-md);background:linear-gradient(135deg,rgba(0,104,74,.03) 0%,rgba(0,104,74,.07) 100%)}
+[data-theme="dark"] .mode-option:hover{background:linear-gradient(135deg,rgba(0,104,74,.06) 0%,rgba(0,104,74,.12) 100%)}
+.mode-option.active{border-color:var(--mg-primary);background:rgba(0,104,74,.04);box-shadow:0 0 0 3px rgba(0,104,74,.12)}
+.mode-option .mode-icon{font-size:28px;margin-bottom:10px;display:block}
+.mode-option h3{font-size:15px;font-weight:600;margin-bottom:4px}
+.mode-option .mode-sub{font-size:12px;color:var(--text-muted);font-family:var(--font-mono)}
+.mode-option .mode-desc{font-size:12px;color:var(--text-secondary);margin-top:8px;line-height:1.5}
+.gen-layout{display:grid;grid-template-columns:1fr 400px;gap:24px;align-items:start}
+.form-section{margin-bottom:28px}
+.form-section-title{font-size:14px;font-weight:600;margin-bottom:14px;display:flex;align-items:center;gap:8px;color:var(--text-primary)}
+.form-section-title .icon{font-size:16px}
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.form-group{display:flex;flex-direction:column;gap:4px}
+.form-group label{font-size:12px;font-weight:500;color:var(--text-muted);display:flex;align-items:center;gap:4px}
+.form-group label .req{color:#e53e3e;font-weight:700}
+.form-group label .param{font-family:var(--font-mono);color:var(--mg-primary);font-weight:600;font-size:11px}
+.form-group input,.form-group select{height:38px;padding:0 12px;border:1px solid var(--border-color);border-radius:var(--radius-sm);font-size:13px;font-family:var(--font-body);background:var(--bg-card);color:var(--text-primary);transition:all var(--transition-fast);outline:none}
+.form-group input:focus,.form-group select:focus{border-color:var(--mg-primary);box-shadow:0 0 0 3px rgba(0,104,74,.1)}
+.form-group input::placeholder{color:var(--text-muted);font-size:12px}
+.form-group.full{grid-column:1/-1}
+.conditional-section{display:none}
+.conditional-section.show{display:block}
+.terminal-panel{position:sticky;top:calc(var(--nav-height) + 16px)}
+.terminal-box{background:var(--bg-code);border-radius:var(--radius-lg);overflow:hidden;box-shadow:var(--shadow-lg),0 0 40px rgba(0,104,74,.08)}
+[data-theme="dark"] .terminal-box{box-shadow:var(--shadow-lg),0 0 50px rgba(0,104,74,.12)}
+.terminal-bar{height:40px;background:rgba(255,255,255,.04);display:flex;align-items:center;padding:0 16px;gap:8px;border-bottom:1px solid rgba(255,255,255,.06)}
+.terminal-dot{width:12px;height:12px;border-radius:50%}
+.terminal-dot:nth-child(1){background:#ff5f57}
+.terminal-dot:nth-child(2){background:#ffbd2e}
+.terminal-dot:nth-child(3){background:#28c840}
+.terminal-title{margin-left:12px;font-size:12px;color:rgba(255,255,255,.35);font-family:var(--font-mono)}
+.terminal-label{font-size:11px;font-weight:600;color:rgba(255,255,255,.3);text-transform:uppercase;letter-spacing:1.5px;padding:16px 20px 8px;font-family:var(--font-mono)}
+.terminal-content{padding:0 20px 20px;font-family:var(--font-mono);font-size:13px;line-height:2;white-space:pre-wrap;word-break:break-all;max-height:500px;overflow-y:auto;color:#e8edf2}
+.terminal-content .prompt{color:#28c840}
+.terminal-content .cmd{color:#e8edf2}
+.terminal-content .param{color:#818cf8}
+.terminal-content .value{color:#ffd866}
+.terminal-content .comment{color:#607080;font-style:italic}
+.terminal-content .warn{color:#ffbd2e}
+.terminal-actions{display:flex;gap:8px;padding:12px 20px;border-top:1px solid rgba(255,255,255,.06)}
+.terminal-btn{flex:1;padding:8px 0;border-radius:var(--radius-sm);font-size:12px;font-weight:600;cursor:pointer;transition:all var(--transition-fast);border:none;font-family:var(--font-body)}
+.terminal-btn.copy{background:var(--mg-primary);color:#fff}
+.terminal-btn.copy:hover{background:var(--mg-dark)}
+.terminal-btn.reset{background:rgba(255,255,255,.08);color:rgba(255,255,255,.6);border:1px solid rgba(255,255,255,.12)}
+.terminal-btn.reset:hover{background:rgba(255,255,255,.12);color:#fff}
+.footer{border-top:1px solid var(--border-color);padding:40px 0 24px;margin-top:60px}
+.footer-inner{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--text-muted)}
+.footer-links{display:flex;gap:20px}
+.footer-links a{color:var(--text-muted);font-size:13px}
+.footer-links a:hover{color:var(--mg-primary)}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--mg-primary);color:#fff;padding:10px 24px;border-radius:var(--radius-md);font-size:14px;font-weight:500;opacity:0;transition:all .3s ease;z-index:9999;box-shadow:var(--shadow-lg)}
+.toast.show{transform:translateX(-50%) translateY(0);opacity:1}
+@media(max-width:768px){
+  .nav-links{display:none}.mobile-toggle{display:block}
+  .nav-links.open{display:flex;flex-direction:column;position:absolute;top:var(--nav-height);left:0;right:0;background:var(--bg-card);border-bottom:1px solid var(--border-color);padding:16px 24px;gap:4px;box-shadow:var(--shadow-md)}
+  .mode-selector{grid-template-columns:1fr}
+  .gen-layout{grid-template-columns:1fr}
+  .terminal-panel{position:relative;top:auto}
+  .form-grid{grid-template-columns:1fr}
+  .footer-inner{flex-direction:column;gap:12px;text-align:center}
+}
+.back-to-top{position:fixed;bottom:28px;right:28px;z-index:999;width:48px;height:48px;opacity:0;pointer-events:none;transition:all .3s ease}
+.back-to-top.visible{opacity:1;pointer-events:auto}.back-to-top:hover{transform:translateY(-3px)}
+.btt-progress{position:absolute;top:0;left:0;width:48px;height:48px;transform:rotate(-90deg)}
+.btt-progress circle{fill:none;stroke:var(--mg-primary);stroke-width:2.5;stroke-dasharray:125.66;stroke-dashoffset:125.66;stroke-linecap:round;transition:stroke-dashoffset .1s linear}
+.btt-btn{position:absolute;top:4px;left:4px;width:40px;height:40px;border-radius:50%;border:none;background:var(--bg-card);color:var(--mg-primary);font-size:18px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:var(--shadow-md);transition:all .2s ease;border:1px solid var(--border-color)}
+.btt-btn:hover{background:var(--mg-primary);color:#fff}
+</style>
+</head>
+<body>
+<svg style="position:absolute;width:0;height:0" aria-hidden="true">
+  <filter id="noiseFilter">
+    <feTurbulence type="fractalNoise" baseFrequency="0.65" numOctaves="3" stitchTiles="stitch"/>
+    <feColorMatrix type="saturate" values="0"/>
+  </filter>
+</svg>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="index.html" class="nav-brand"><div class="nav-brand-icon">M</div><span>MongoDBShellInstall</span></a>
+    <div class="nav-links" id="navLinks">
+      <a href="index.html">首页</a>
+      <a href="generator.html" class="active">命令生成器</a>
+      <a href="docs.html">使用文档</a>
+    </div>
+    <div class="nav-right">
+      <button class="theme-toggle" id="themeToggle" title="切换主题">☀</button>
+      <a href="generator.html" class="nav-cta">开始使用</a>
+      <button class="mobile-toggle" id="mobileToggle">☰</button>
+    </div>
+  </div>
+</nav>
+
+<section class="page-header">
+  <div class="container">
+    <h1>安装命令生成器</h1>
+    <p>选择安装模式，配置参数，实时生成可执行的 MongoDB Shell 安装命令</p>
+  </div>
+</section>
+
+<main class="container">
+  <div class="mode-selector">
+    <div class="mode-option active" data-mode="single" onclick="selectMode('single')">
+      <span class="mode-icon">⚙</span>
+      <h3>单机模式</h3>
+      <div class="mode-sub">Standalone</div>
+      <div class="mode-desc">适用于开发测试环境</div>
+    </div>
+    <div class="mode-option" data-mode="replicaset" onclick="selectMode('replicaset')">
+      <span class="mode-icon">🔰</span>
+      <h3>副本集模式</h3>
+      <div class="mode-sub">Replica Set · 3+ 节点</div>
+      <div class="mode-desc">高可用生产环境推荐</div>
+    </div>
+  </div>
+
+  <div class="gen-layout">
+    <div class="form-panel">
+      <div class="form-section">
+        <div class="form-section-title"><span class="icon">◆</span> 基础配置</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label><span class="param">-n</span> 主机名前缀</label>
+            <input type="text" id="f-n" placeholder="默认: mongodb" oninput="updateCmd()">
+          </div>
+          <div class="form-group">
+            <label><span class="param">-d</span> 安装根目录</label>
+            <input type="text" id="f-d" placeholder="默认: /mongodb" oninput="updateCmd()">
+          </div>
+          <div class="form-group">
+            <label><span class="param">-p</span> MongoDB 端口</label>
+            <input type="text" id="f-p" placeholder="默认: 27017" oninput="updateCmd()">
+          </div>
+          <div class="form-group">
+            <label><span class="param">-ou</span> 系统用户名</label>
+            <input type="text" id="f-ou" placeholder="默认: mongod" oninput="updateCmd()">
+          </div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <div class="form-section-title"><span class="icon">🔒</span> 认证配置</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label><span class="param">--auth</span> 启用认证</label>
+            <select id="f-auth" onchange="updateCmd()"><option value="">否</option><option value="Y">是</option></select>
+          </div>
+          <div class="form-group conditional-section" id="adminUserGroup">
+            <label><span class="param">--admin-user</span> 管理员用户名</label>
+            <input type="text" id="f-admin-user" placeholder="默认: admin" oninput="updateCmd()">
+          </div>
+          <div class="form-group conditional-section" id="adminPassGroup">
+            <label><span class="req">*</span><span class="param">--admin-pass</span> 管理员密码</label>
+            <input type="text" id="f-admin-pass" placeholder="启用认证时必填" oninput="updateCmd()">
+          </div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <div class="form-section-title"><span class="icon">📦</span> MongoDB 配置</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label><span class="param">--max-connections</span> 最大连接数</label>
+            <input type="number" id="f-maxconn" placeholder="默认: 65536" min="100" oninput="updateCmd()">
+          </div>
+          <div class="form-group">
+            <label><span class="param">--backup-days</span> 备份保留 (天)</label>
+            <input type="number" id="f-backup" placeholder="默认: 7" min="1" oninput="updateCmd()">
+          </div>
+        </div>
+      </div>
+
+      <div class="conditional-section" id="clusterParams">
+        <div class="form-section">
+          <div class="form-section-title"><span class="icon">🔗</span> 副本集参数</div>
+          <div class="form-grid">
+            <div class="form-group full">
+              <label><span class="req">*</span><span class="param">-ri</span> 副本集节点 IP</label>
+              <input type="text" id="f-ri" placeholder="例如: 192.168.1.11,192.168.1.12,192.168.1.13" oninput="updateCmd()">
+            </div>
+            <div class="form-group">
+              <label><span class="req">*</span><span class="param">-rp</span> 远程 root 密码</label>
+              <input type="text" id="f-rp" placeholder="所有节点 root 密码需一致" oninput="updateCmd()">
+            </div>
+            <div class="form-group">
+              <label><span class="param">-ss</span> SSH 端口</label>
+              <input type="text" id="f-ss" placeholder="默认: 22" oninput="updateCmd()">
+            </div>
+            <div class="form-group">
+              <label><span class="param">--repl-set</span> 副本集名称</label>
+              <input type="text" id="f-replset" placeholder="默认: rs0" oninput="updateCmd()">
+            </div>
+            <div class="form-group">
+              <label><span class="param">--oplog-size</span> Oplog 大小 (MB)</label>
+              <input type="number" id="f-oplog" placeholder="默认: 自动计算" min="100" oninput="updateCmd()">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <div class="form-section-title"><span class="icon">⚙</span> 系统选项</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label><span class="param">--os-only</span> 仅配置操作系统</label>
+            <select id="f-osonly" onchange="updateCmd()"><option value="">否</option><option value="Y">是</option></select>
+          </div>
+          <div class="form-group">
+            <label><span class="param">--debug</span> 调试模式</label>
+            <select id="f-debug" onchange="updateCmd()"><option value="">否</option><option value="Y">是</option></select>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="terminal-panel">
+      <div class="terminal-box">
+        <div class="terminal-bar">
+          <span class="terminal-dot"></span><span class="terminal-dot"></span><span class="terminal-dot"></span>
+          <span class="terminal-title">Terminal</span>
+        </div>
+        <div class="terminal-label">生成的安装命令</div>
+        <div class="terminal-content" id="cmdOutput"></div>
+        <div class="terminal-actions">
+          <button class="terminal-btn reset" onclick="resetForm()">重置参数</button>
+          <button class="terminal-btn copy" onclick="copyCmd()">复制命令</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer class="footer">
+  <div class="container">
+    <div class="footer-inner">
+      <span>Copyright &copy; 2024-2026 MongoDBShellInstall</span>
+      <div class="footer-links">
+        <a href="index.html">首页</a>
+        <a href="docs.html">使用文档</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<div class="back-to-top" id="backToTop">
+  <svg class="btt-progress" viewBox="0 0 48 48"><circle cx="24" cy="24" r="20"></circle></svg>
+  <button class="btt-btn" aria-label="返回顶部">↑</button>
+</div>
+
+<div class="toast" id="toast">已复制到剪贴板</div>
+<script>
+let currentMode = 'single';
+const modeLabels = {
+  'single': '单机模式 (Standalone)',
+  'replicaset': '副本集模式 (Replica Set)'
+};
+
+function isRS() { return currentMode === 'replicaset'; }
+
+function selectMode(mode) {
+  currentMode = mode;
+  document.querySelectorAll('.mode-option').forEach(el => {
+    el.classList.toggle('active', el.dataset.mode === mode);
+  });
+  document.getElementById('clusterParams').classList.toggle('show', isRS());
+  // Auto-enable auth for replica set
+  if (isRS()) {
+    document.getElementById('f-auth').value = 'Y';
+    document.getElementById('adminUserGroup').classList.add('show');
+    document.getElementById('adminPassGroup').classList.add('show');
+  }
+  updateCmd();
+}
+
+function getVal(id) { return document.getElementById(id)?.value?.trim() || ''; }
+
+function updateCmd() {
+  const lines = [];
+  const missing = [];
+
+  // Auth visibility
+  const authEnabled = getVal('f-auth') === 'Y';
+  document.getElementById('adminUserGroup').classList.toggle('show', authEnabled);
+  document.getElementById('adminPassGroup').classList.toggle('show', authEnabled);
+
+  lines.push({ text: 'bash MongoDB.sh \\', type: 'cmd' });
+
+  // Mode
+  if (isRS()) {
+    lines.push({ text: '-m replicaset', comment: '副本集模式' });
+  } else {
+    lines.push({ text: '-m single', comment: '单机模式' });
+  }
+
+  // Basic params
+  const basicParams = [
+    { id: 'f-n', flag: '-n', label: '主机名前缀' },
+    { id: 'f-d', flag: '-d', label: '安装根目录' },
+    { id: 'f-p', flag: '-p', label: 'MongoDB 端口' },
+    { id: 'f-ou', flag: '-ou', label: '系统用户名' },
+  ];
+  basicParams.forEach(p => {
+    const v = getVal(p.id);
+    if (v) lines.push({ text: `${p.flag} ${v}`, comment: p.label });
+  });
+
+  // Auth
+  if (authEnabled) {
+    lines.push({ text: '--auth', comment: '启用认证' });
+    const adminUser = getVal('f-admin-user');
+    if (adminUser) lines.push({ text: `--admin-user ${adminUser}`, comment: '管理员用户名' });
+    const adminPass = getVal('f-admin-pass');
+    if (adminPass) lines.push({ text: `--admin-pass '${adminPass}'`, comment: '管理员密码' });
+    else missing.push('--admin-pass 管理员密码');
+  }
+
+  // MongoDB config
+  const mongoParams = [
+    { id: 'f-maxconn', flag: '--max-connections', label: '最大连接数' },
+    { id: 'f-backup', flag: '--backup-days', label: '备份保留(天)' },
+  ];
+  mongoParams.forEach(p => {
+    const v = getVal(p.id);
+    if (v) lines.push({ text: `${p.flag} ${v}`, comment: p.label });
+  });
+
+  // System options
+  const osOnly = getVal('f-osonly');
+  if (osOnly === 'Y') lines.push({ text: '--os-only', comment: '仅配置操作系统' });
+  const debug = getVal('f-debug');
+  if (debug === 'Y') lines.push({ text: '--debug', comment: '调试模式' });
+
+  // Cluster params
+  if (isRS()) {
+    const ri = getVal('f-ri');
+    if (ri) lines.push({ text: `-ri ${ri}`, comment: '副本集节点 IP' });
+    else missing.push('-ri 副本集节点 IP');
+
+    const rp = getVal('f-rp');
+    if (rp) lines.push({ text: `-rp '${rp}'`, comment: '远程 root 密码' });
+    else missing.push('-rp 远程 root 密码');
+
+    const ss = getVal('f-ss');
+    if (ss) lines.push({ text: `-ss ${ss}`, comment: 'SSH 端口' });
+
+    const replSet = getVal('f-replset');
+    if (replSet) lines.push({ text: `--repl-set ${replSet}`, comment: '副本集名称' });
+
+    const oplog = getVal('f-oplog');
+    if (oplog) lines.push({ text: `--oplog-size ${oplog}`, comment: 'Oplog 大小(MB)' });
+  }
+
+  // Build output HTML
+  let html = '';
+  if (lines.length <= 2 && currentMode === 'single') {
+    html += `<span class="prompt">$ </span><span class="cmd">bash MongoDB.sh -m single</span>`;
+    html += ` <span class="comment"># ${modeLabels[currentMode]}</span>\n`;
+  }
+  if (!html) {
+    lines.forEach((line, i) => {
+      if (i === 0) {
+        html += `<span class="prompt">$ </span><span class="cmd">${line.text}</span>`;
+        html += ` <span class="comment"># ${modeLabels[currentMode]}</span>\n`;
+      } else {
+        const cont = i < lines.length - 1 ? ' \\' : '';
+        const parts = line.text.split(' ');
+        const flag = parts[0];
+        const val = parts.slice(1).join(' ');
+        if (val) {
+          html += `  <span class="param">${flag} </span><span class="value">${val}</span>${cont}`;
+        } else {
+          html += `  <span class="param">${flag}</span>${cont}`;
+        }
+        if (line.comment) html += ` <span class="comment"># ${line.comment}</span>`;
+        html += '\n';
+      }
+    });
+  }
+
+  // Validation warnings
+  const warnings = [];
+  if (isRS()) {
+    const ri = getVal('f-ri');
+    if (ri) {
+      const nodeCount = ri.split(',').filter(s => s.trim()).length;
+      if (nodeCount < 3) {
+        warnings.push('副本集建议至少 3 个节点 (当前: ' + nodeCount + ')');
+      } else if (nodeCount % 2 === 0) {
+        warnings.push('节点数为偶数，建议使用奇数个节点以避免选举分裂 (当前: ' + nodeCount + ')');
+      }
+    }
+    if (!authEnabled) {
+      warnings.push('副本集模式建议启用 --auth 认证');
+    }
+  }
+
+  if (missing.length > 0) {
+    html += `\n<span class="warn"># ⚠ 请填写必填参数: ${missing.join(', ')}</span>`;
+  }
+  warnings.forEach(w => {
+    html += `\n<span class="warn"># ⚠ ${w}</span>`;
+  });
+
+  document.getElementById('cmdOutput').innerHTML = html;
+}
+
+function resetForm() {
+  document.querySelectorAll('.form-panel input, .form-panel select').forEach(el => {
+    if (el.tagName === 'SELECT') el.selectedIndex = 0;
+    else el.value = '';
+  });
+  selectMode('single');
+}
+
+function copyCmd() {
+  const el = document.getElementById('cmdOutput');
+  const text = el.innerText
+    .replace(/^[\$]\s*/, '')
+    .replace(/# ⚠.*$/gm, '')
+    .replace(/\s*#[^\n]*/g, '')
+    .replace(/\n\s*\n/g, '\n')
+    .trim();
+  navigator.clipboard.writeText(text).then(() => {
+    const toast = document.getElementById('toast');
+    toast.classList.add('show');
+    setTimeout(() => toast.classList.remove('show'), 2000);
+  });
+}
+
+const themeToggle = document.getElementById('themeToggle');
+const htmlEl = document.documentElement;
+const saved = localStorage.getItem('msi-theme');
+if (saved) { htmlEl.dataset.theme = saved; themeToggle.textContent = saved === 'dark' ? '☾' : '☀'; }
+themeToggle.addEventListener('click', () => {
+  const next = htmlEl.dataset.theme === 'dark' ? 'light' : 'dark';
+  htmlEl.dataset.theme = next;
+  localStorage.setItem('msi-theme', next);
+  themeToggle.textContent = next === 'dark' ? '☾' : '☀';
+});
+document.getElementById('mobileToggle').addEventListener('click', () => {
+  document.getElementById('navLinks').classList.toggle('open');
+});
+const backToTop = document.getElementById('backToTop');
+const bttCircle = backToTop.querySelector('.btt-progress circle');
+const bttBtn = backToTop.querySelector('.btt-btn');
+const totalDash = 125.66;
+window.addEventListener('scroll', () => {
+  const scrollTop = window.scrollY;
+  const docHeight = document.documentElement.scrollHeight - window.innerHeight;
+  const scrollPercent = docHeight > 0 ? scrollTop / docHeight : 0;
+  bttCircle.style.strokeDashoffset = totalDash - (totalDash * scrollPercent);
+  backToTop.classList.toggle('visible', scrollTop > 300);
+});
+bttBtn.addEventListener('click', () => window.scrollTo({ top: 0, behavior: 'smooth' }));
+updateCmd();
+</script>
+</body>
+</html>
