@@ -209,7 +209,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:100%;pointe
   centos/
     7/x86_64/</div>
 </div>
-<p>GA 发布资产直接提供经实机 ISO 差集验证的 <code>mongdb-offline-rpm.tar.gz</code>；安装用户不需要运行生成工具。归档内部只允许包含 RPM 依赖包，不放清单、校验文件或其他辅助文件，也不增加 SHA256SUMS 校验。当前测试使用的 RHEL 8/9 与 Rocky Linux 8/9 完整 DVD ISO 已包含所需依赖，补充包只包含 CentOS 7 x86_64 DVD ISO 缺失的 <code>sshpass</code>。<code>tools/build_offline_rpm_bundle.sh</code> 仅供维护者在更换 ISO 或增加 OS/架构时重建介质，不能替代实际补充包交付。安装时先尝试 <code>--os-iso-root</code> 指定的已挂载 ISO，再使用补充包，最后才尝试在线仓库。</p>
+<p><code>mongdb-offline-rpm.tar.gz</code> 仅在指定 ISO 确实缺少依赖时提供；归档内部只允许包含 RPM 依赖包，不放清单、校验文件或其他辅助文件，也不增加 SHA256SUMS 校验。当前测试使用的 RHEL 8/9、Rocky Linux 8/9 与 CentOS 7 完整 DVD ISO 已包含安装所需系统依赖，因此无需补充包。密码首次登录改用 OpenSSH 原生 <code>SSH_ASKPASS</code> 建立 Ed25519 公钥信任，不再依赖 <code>sshpass</code>。<code>tools/build_offline_rpm_bundle.sh</code> 仅供维护者在更换 ISO 或增加 OS/架构并确认实际缺包后重建介质。安装时先尝试 <code>--os-iso-root</code> 指定的已挂载 ISO，再使用确有需要的补充包，最后才尝试在线仓库。</p>
 <div class="note"><strong>提示：</strong>只有一个 MongoDB Server 包时自动选择；有多个时交互选择。非交互安装存在多个包时必须通过 <code>--mongo-package</code> 指定文件名或版本。脚本会校验 Server 包和 OS 离线包，Server 包文件名不得包含 "database-tools" 或 "mongosh"。</div>
 
 <h2 id="media">安装介质</h2>
@@ -402,7 +402,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:100%;pointe
 <tr><td>-H, --hosts</td><td>副本集 DNS 主机名（逗号分隔，按节点顺序）</td><td>-</td></tr>
 <tr><td>-ri, --remote-ips</td><td>逐节点 SSH 端点/IP；数量和顺序必须与 <code>--hosts</code> 一致</td><td>未指定时回退使用成员名</td></tr>
 <tr><td>-sk, --ssh-key</td><td>远程 root SSH 私钥（推荐）</td><td>默认 SSH 密钥/agent</td></tr>
-<tr><td>-rpf, --root-pass-file</td><td>远程 root 密码文件（权限建议 600）</td><td>-</td></tr>
+<tr><td>-rpf, --root-pass-file</td><td>远程 root 密码文件（权限建议 600）；用于首次认证并自动建立 Ed25519 公钥信任，后续改用私钥</td><td>-</td></tr>
 <tr><td>-rp, --root-pass</td><td>兼容参数；不推荐，值可能进入 shell 历史</td><td>-</td></tr>
 <tr><td>-ss, --ssh-port</td><td>SSH 端口</td><td>22</td></tr>
 <tr><td>-kh, --known-hosts</td><td>经过核验的 SSH 主机密钥文件</td><td>~/.ssh/known_hosts</td></tr>
@@ -541,6 +541,13 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:100%;pointe
 <p>不可以。脚本为该用户配置 <code>/sbin/nologin</code> 并锁定密码，将其同名组设为主组。MongoDB 通过 systemd 以同一用户和组（例如 <code>User=mongoops</code>、<code>Group=mongoops</code>）运行。</p>
 
 <h2 id="changelog">更新日志</h2>
+
+<h3>v2.0.2 (2026-08)</h3>
+<ul>
+<li>移除 <code>sshpass</code> 运行时依赖及对应离线 RPM；当前认证 OS/ISO 矩阵无需 <code>mongdb-offline-rpm.tar.gz</code></li>
+<li>密码模式使用 OpenSSH 原生 <code>SSH_ASKPASS</code> 完成首次认证，自动生成专用 Ed25519 密钥并幂等写入远端 <code>authorized_keys</code></li>
+<li>公钥免密登录验证成功后，远程命令与并行分发全部切换为私钥认证；继续强制校验预先核验的 <code>known_hosts</code></li>
+</ul>
 
 <h3>v2.0.1 (2026-08)</h3>
 <ul>

@@ -6,7 +6,6 @@ installer="${repo_dir}/MongoDB.sh"
 generator="${repo_dir}/generator.html"
 docs="${repo_dir}/docs.html"
 builder="${repo_dir}/tools/build_offline_rpm_bundle.sh"
-offline_bundle="${repo_dir}/mongdb-offline-rpm.tar.gz"
 
 passes=0
 failures=0
@@ -338,8 +337,16 @@ if declare -F validate_os_package_bundle >/dev/null; then
   original_os_distro="$os_distro"
   original_os_version="$os_version"
   original_os_arch="$os_arch"
-  tar -xzf "$offline_bundle" -C "$archive_fixture"
-  fixture_dir="${archive_fixture}/mongdb-offline-rpm/centos/7/x86_64"
+  fixture_dir="${archive_fixture}/source/mongdb-offline-rpm/centos/7/x86_64"
+  mkdir -p "$fixture_dir"
+  : > "${fixture_dir}/fixture-1.0-1.x86_64.rpm"
+  rpm() {
+    if [[ "$1" == "-qp" && "$2" == "--qf" && "$3" == '%{ARCH}' ]]; then
+      printf 'x86_64'
+      return 0
+    fi
+    command rpm "$@"
+  }
   os_distro=centos
   os_version=7
   os_arch=x86_64
@@ -353,13 +360,14 @@ if declare -F validate_os_package_bundle >/dev/null; then
   os_version=7
   assert_failure "reject CentOS bundle on Rocky despite shared family" validate_os_package_bundle "$fixture_dir"
 
+  tar -C "${archive_fixture}/source" -czf "${archive_fixture}/mongdb-offline-rpm.tar.gz" mongdb-offline-rpm
   original_os_packages_archive="$os_packages_archive"
   original_os_packages_root="$os_packages_root"
   original_os_packages_dir="$os_packages_dir"
   os_distro=centos
   os_version=7
   os_arch=x86_64
-  os_packages_archive="$offline_bundle"
+  os_packages_archive="${archive_fixture}/mongdb-offline-rpm.tar.gz"
   os_packages_root="${archive_fixture}/not-extracted"
   os_packages_dir=''
   if prepare_os_packages_root \
@@ -375,6 +383,7 @@ if declare -F validate_os_package_bundle >/dev/null; then
   os_distro="$original_os_distro"
   os_version="$original_os_version"
   os_arch="$original_os_arch"
+  unset -f rpm
   rm -rf "$archive_fixture"
 else
   fail "OS offline bundle validator exists"
@@ -723,21 +732,18 @@ assert_file_contains "generator exposes independent backup directory" "$generato
 assert_file_contains "installer uses requested offline archive name" "$installer" 'mongdb-offline-rpm\.tar\.gz'
 assert_file_contains "documentation uses requested offline archive layout" "$docs" 'mongdb-offline-rpm/rhel/9/x86_64/'
 assert_file_contains "offline bundle builder emits requested top-level directory" "$builder" 'mongdb-offline-rpm/\$\{os_id\}/\$\{os_major\}/\$\{arch\}/'
-assert_file_contains "offline bundle builder includes password-based replica dependency" "$builder" '^[[:space:]]*sshpass$'
+assert_file_not_contains "installer has no sshpass runtime dependency" "$installer" 'SSHPASS=|sshpass[[:space:]]+-e|required_commands\+=\(sshpass\)'
+assert_file_not_contains "offline bundle builder does not default to sshpass" "$builder" '^[[:space:]]*sshpass$'
+assert_file_contains "password bootstrap uses native OpenSSH askpass" "$installer" 'SSH_ASKPASS_REQUIRE=force'
+assert_file_contains "temporary askpass helper is removed on exit" "$installer" '/tmp/mongo-ssh-askpass\.\*'
+assert_file_contains "password bootstrap generates an Ed25519 key" "$installer" "ssh-keygen -q -t ed25519"
+assert_file_contains "password bootstrap installs authorized key idempotently" "$installer" 'grep -Fqx.*authorized_keys'
+assert_file_contains "password bootstrap verifies key login before deployment" "$installer" 'SSH 公钥信任验证失败'
+assert_file_contains "offline bundle selection is limited to requested package names" "$installer" 'package_name.*requested_name'
+assert_file_contains "dependency installation passes the current missing package set" "$installer" 'install_os_offline_bundle "\$\{requested_packages\[@\]\}"'
 assert_file_contains "CentOS 7 ISO path uses yum when dnf is unavailable" "$installer" 'command -v yum'
 assert_file_contains "offline RPM signatures are verified" "$installer" 'rpm --checksig'
-assert_file_contains "documentation distinguishes actual bundle delivery from maintainer tooling" "$docs" '安装用户不需要运行生成工具'
-assert_success "actual offline bundle is a readable gzip tar archive" tar -tzf "$offline_bundle"
-if tar -tzf "$offline_bundle" 2>/dev/null | grep -Eq '^mongdb-offline-rpm/centos/7/x86_64/sshpass-[^/]+\.rpm$'; then
-  pass "actual offline bundle contains the CentOS 7 ISO gap"
-else
-  fail "actual offline bundle contains the CentOS 7 ISO gap"
-fi
-if tar -tzf "$offline_bundle" 2>/dev/null | grep -Ev '/$|\.rpm$' | grep -q .; then
-  fail "actual offline bundle contains RPM dependencies only"
-else
-  pass "actual offline bundle contains RPM dependencies only"
-fi
+assert_file_contains "documentation records native password-to-key bootstrap" "$docs" 'SSH_ASKPASS.*Ed25519'
 assert_file_not_contains "documentation commands do not comment after line continuations" "$docs" '\\[[:space:]]*<span class="c">'
 assert_success "installer passes Bash syntax validation" bash -n "$installer"
 assert_success "offline bundle builder passes Bash syntax validation" bash -n "$builder"

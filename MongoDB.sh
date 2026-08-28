@@ -4,7 +4,7 @@
 # 创建时间   :   2026-04-24 00:00:00
 # 描述      :   MongoDB 一键安装脚本（单机/副本集 双模式）
 # 路径      :   /soft/MongoDBShellInstall
-# 版本      :   2.0.1
+# 版本      :   2.0.2
 # 借鉴      :   KafkaShellInstall
 # 兼容      :   RHEL/CentOS/Rocky/Alma 7-9, Debian 10-13, Ubuntu 18.04-24.04,
 #               openSUSE/SLES 12-15, Arch Linux, Fedora, Amazon Linux 2/2023
@@ -46,7 +46,7 @@ cleanup_on_exit() {
   done
   for tmpd in ${MONGO_INSTALL_TMPDIRS[@]+"${MONGO_INSTALL_TMPDIRS[@]}"}; do
     case "$tmpd" in
-      /tmp/mongo_install.*|/tmp/mongosh_install.*|/tmp/mongotools_install.*|/tmp/mongo-os-packages.*|/tmp/mongo-ssh-control.*)
+      /tmp/mongo_install.*|/tmp/mongosh_install.*|/tmp/mongotools_install.*|/tmp/mongo-os-packages.*|/tmp/mongo-ssh-control.*|/tmp/mongo-ssh-askpass.*)
         [[ -d "$tmpd" || -L "$tmpd" ]] && rm -rf -- "$tmpd"
         ;;
     esac
@@ -68,7 +68,7 @@ trap 'handle_signal TERM 143' TERM
 #==============================================================#
 #                         全局变量定义                         #
 #==============================================================#
-MONGO_INSTALL_VERSION="2.0.1"
+MONGO_INSTALL_VERSION="2.0.2"
 
 software_dir=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 script_name=$(basename "${BASH_SOURCE[0]}")
@@ -188,7 +188,9 @@ export serverport=22
 remote_root_pass=""
 remote_root_pass_file=""
 ssh_identity_file=""
-ssh_known_hosts_file="${HOME:-/root}/.ssh/known_hosts"
+ssh_known_hosts_file="/root/.ssh/known_hosts"
+ssh_bootstrap_key_file="/root/.ssh/mongodb_install_ed25519"
+mongo_ssh_askpass_dir=""
 
 # 副本集名称
 repl_set_name="rs0"
@@ -1531,8 +1533,8 @@ function validate_os_package_bundle() {
 }
 
 function install_os_offline_bundle() {
-  local bundle_dir package_file
-  local -a package_files=()
+  local bundle_dir package_file package_name requested_name selected
+  local -a requested_packages=("$@") package_files=() selected_package_files=()
   bundle_dir=$(resolve_os_packages_dir) || return $?
   validate_os_package_bundle "$bundle_dir" || return 1
   case "$os_distro_family" in
@@ -1550,6 +1552,21 @@ function install_os_offline_bundle() {
     echo "错误: OS 离线包目录中没有当前平台的软件包: ${bundle_dir}" >&2
     return 1
   }
+  if (( ${#requested_packages[@]} > 0 )); then
+    for package_file in "${package_files[@]}"; do
+      package_name=$(rpm -qp --qf '%{NAME}' "$package_file" 2>/dev/null) || return 1
+      selected=0
+      for requested_name in "${requested_packages[@]}"; do
+        if [[ "$package_name" == "$requested_name" ]]; then
+          selected=1
+          break
+        fi
+      done
+      (( selected == 0 )) || selected_package_files+=("$package_file")
+    done
+    package_files=("${selected_package_files[@]}")
+    (( ${#package_files[@]} > 0 )) || return 3
+  fi
   echo "使用 OS 离线补充包: ${bundle_dir} (${#package_files[@]} 个)"
   case "$os_distro_family" in
     rhel)
@@ -1729,7 +1746,9 @@ function pkg_install() {
   fi
   if [[ "$mongo_install_mode" == "replicaset" ]]; then
     required_commands+=(ssh scp)
-    [[ -n "$remote_root_pass" ]] && required_commands+=(sshpass)
+    if [[ -n "$remote_root_pass" && -z "$ssh_identity_file" ]]; then
+      required_commands+=(setsid ssh-keygen base64 install)
+    fi
     [[ "$mongo_auth_enabled" == "Y" || "$mongo_tls_enabled" == "Y" ]] && required_commands+=(openssl)
   fi
 
@@ -1739,15 +1758,17 @@ function pkg_install() {
       rhel:ss|rhel:ip) required_packages+=(iproute) ;;
       rhel:ps) required_packages+=(procps-ng) ;;
       rhel:sort|rhel:sha256sum) required_packages+=(coreutils) ;;
-      rhel:ssh|rhel:scp) required_packages+=(openssh-clients) ;;
-      rhel:sshpass) required_packages+=(sshpass) ;;
+      rhel:ssh|rhel:scp|rhel:ssh-keygen) required_packages+=(openssh-clients) ;;
+      rhel:setsid) required_packages+=(util-linux) ;;
+      rhel:base64|rhel:install) required_packages+=(coreutils) ;;
       rhel:openssl) required_packages+=(openssl) ;;
       rhel:numactl) required_packages+=(numactl) ;;
       rhel:hostnamectl|rhel:systemctl) required_packages+=(systemd) ;;
       debian:ss|debian:ip) required_packages+=(iproute2) ;;
       debian:ps) required_packages+=(procps) ;;
-      debian:ssh|debian:scp) required_packages+=(openssh-client) ;;
-      debian:sshpass) required_packages+=(sshpass) ;;
+      debian:ssh|debian:scp|debian:ssh-keygen) required_packages+=(openssh-client) ;;
+      debian:setsid) required_packages+=(util-linux) ;;
+      debian:base64|debian:install) required_packages+=(coreutils) ;;
       debian:openssl) required_packages+=(openssl) ;;
       *) required_packages+=("$command_name") ;;
     esac
@@ -1775,7 +1796,7 @@ function pkg_install() {
     if (( iso_status != 0 && iso_status != 3 )); then
       return "$iso_status"
     fi
-    install_os_offline_bundle || bundle_status=$?
+    install_os_offline_bundle "${requested_packages[@]}" || bundle_status=$?
     if (( bundle_status != 0 && bundle_status != 3 )); then
       return "$bundle_status"
     fi
@@ -3314,6 +3335,149 @@ function ensure_ssh_control_dir() {
   MONGO_INSTALL_TMPDIRS+=("$mongo_ssh_control_dir")
 }
 
+function ensure_ssh_askpass_helper() {
+  local helper
+  if [[ -n "$mongo_ssh_askpass_dir" && -d "$mongo_ssh_askpass_dir" && ! -L "$mongo_ssh_askpass_dir" ]]; then
+    return 0
+  fi
+  mongo_ssh_askpass_dir=$(mktemp -d /tmp/mongo-ssh-askpass.XXXXXX) || return 1
+  chmod 0700 "$mongo_ssh_askpass_dir" || return 1
+  MONGO_INSTALL_TMPDIRS+=("$mongo_ssh_askpass_dir")
+  helper="${mongo_ssh_askpass_dir}/askpass"
+  cat > "$helper" <<'ASKPASSEOF'
+#!/bin/sh
+[ -n "${MONGO_SSH_ASKPASS_SECRET+x}" ] || exit 1
+printf '%s\n' "$MONGO_SSH_ASKPASS_SECRET"
+ASKPASSEOF
+  chmod 0700 "$helper" || return 1
+}
+
+function run_with_ssh_password() {
+  ensure_ssh_askpass_helper || return 1
+  [[ -n "$remote_root_pass" ]] || return 1
+  DISPLAY=mongodb-install:0 \
+    SSH_ASKPASS="${mongo_ssh_askpass_dir}/askpass" \
+    SSH_ASKPASS_REQUIRE=force \
+    MONGO_SSH_ASKPASS_SECRET="$remote_root_pass" \
+    setsid "$@" </dev/null
+}
+
+function password_remote_exec() {
+  local host="$1"; shift
+  local -a ssh_args=(
+    -T
+    -o StrictHostKeyChecking=yes
+    -o "UserKnownHostsFile=${ssh_known_hosts_file}"
+    -o ConnectTimeout=10
+    -o PubkeyAuthentication=no
+    -o PreferredAuthentications=keyboard-interactive,password
+    -o NumberOfPasswordPrompts=1
+    -p "$serverport"
+  )
+  run_with_ssh_password ssh "${ssh_args[@]}" "root@${host}" "$@"
+}
+
+function key_remote_exec() {
+  local host="$1" key_file="$2"; shift 2
+  ssh -T \
+    -o StrictHostKeyChecking=yes \
+    -o "UserKnownHostsFile=${ssh_known_hosts_file}" \
+    -o ConnectTimeout=10 \
+    -o BatchMode=yes \
+    -o IdentitiesOnly=yes \
+    -i "$key_file" \
+    -p "$serverport" \
+    "root@${host}" "$@"
+}
+
+function bootstrap_ssh_key_trust() {
+  [[ "$mongo_install_mode" == "replicaset" && -n "$remote_root_pass" && -z "$ssh_identity_file" ]] || return 0
+  local key_file="$ssh_bootstrap_key_file" public_key key_b64 remote_command
+  local endpoint local_ip owner_id index key_dir previous_umask
+  [[ "$key_file" == /* && "$key_file" != *$'\n'* && "$key_file" != *$'\r'* ]] || {
+    echo "错误: 自动生成的 SSH 私钥路径无效: ${key_file}" >&2
+    return 1
+  }
+  key_dir=$(dirname -- "$key_file")
+  if [[ -e "$key_dir" || -L "$key_dir" ]]; then
+    [[ -d "$key_dir" && ! -L "$key_dir" ]] || {
+      echo "错误: SSH 密钥目录不是安全的普通目录: ${key_dir}" >&2
+      return 1
+    }
+    owner_id=$(stat -c '%u' "$key_dir" 2>/dev/null) || return 1
+    [[ "$owner_id" == "0" ]] || {
+      echo "错误: SSH 密钥目录必须归 root 所有: ${key_dir}" >&2
+      return 1
+    }
+    chmod 0700 "$key_dir" || return 1
+  else
+    install -d -m 0700 "$key_dir" || return 1
+  fi
+  if [[ -e "$key_file" || -L "$key_file" ]]; then
+    [[ -f "$key_file" && ! -L "$key_file" ]] || {
+      echo "错误: SSH 私钥不是安全的普通文件: ${key_file}" >&2
+      return 1
+    }
+    owner_id=$(stat -c '%u' "$key_file" 2>/dev/null) || return 1
+    [[ "$owner_id" == "0" ]] || {
+      echo "错误: SSH 私钥必须归 root 所有: ${key_file}" >&2
+      return 1
+    }
+    chmod 0600 "$key_file" || return 1
+    [[ ! -L "${key_file}.pub" ]] || {
+      echo "错误: SSH 公钥不能是符号链接: ${key_file}.pub" >&2
+      return 1
+    }
+    if [[ ! -f "${key_file}.pub" ]]; then
+      previous_umask=$(umask)
+      umask 077
+      if ! ssh-keygen -y -f "$key_file" > "${key_file}.pub"; then
+        umask "$previous_umask"
+        return 1
+      fi
+      umask "$previous_umask"
+    fi
+  else
+    [[ ! -e "${key_file}.pub" && ! -L "${key_file}.pub" ]] || {
+      echo "错误: SSH 公钥已存在但缺少对应私钥: ${key_file}.pub" >&2
+      return 1
+    }
+    ssh-keygen -q -t ed25519 -N '' -C 'MongoDBShellInstall' -f "$key_file" || return 1
+  fi
+  owner_id=$(stat -c '%u' "${key_file}.pub" 2>/dev/null) || return 1
+  [[ "$owner_id" == "0" ]] || {
+    echo "错误: SSH 公钥必须归 root 所有: ${key_file}.pub" >&2
+    return 1
+  }
+  chmod 0600 "$key_file" || return 1
+  chmod 0644 "${key_file}.pub" || return 1
+  ssh-keygen -lf "${key_file}.pub" >/dev/null 2>&1 || {
+    echo "错误: 自动生成的 SSH 公钥无效: ${key_file}.pub" >&2
+    return 1
+  }
+  public_key=$(<"${key_file}.pub")
+  key_b64=$(printf '%s' "$public_key" | base64 | tr -d '\n')
+  [[ "$key_b64" =~ ^[A-Za-z0-9+/=]+$ ]] || return 1
+  remote_command="umask 077; [ ! -L /root/.ssh ] || exit 30; install -d -m 0700 /root/.ssh || exit 31; [ ! -L /root/.ssh/authorized_keys ] || exit 32; touch /root/.ssh/authorized_keys || exit 33; chown root:root /root/.ssh /root/.ssh/authorized_keys || exit 34; chmod 0700 /root/.ssh || exit 35; chmod 0600 /root/.ssh/authorized_keys || exit 36; _key=\$(printf '%s' '${key_b64}' | base64 -d) || exit 37; grep -Fqx \"\$_key\" /root/.ssh/authorized_keys || printf '%s\\n' \"\$_key\" >> /root/.ssh/authorized_keys"
+  local_ip=$(get_local_ip)
+  for ((index=0; index<${#remote_ips_array[@]}; index++)); do
+    endpoint=${remote_ips_array[$index]}
+    is_local_host "$endpoint" "$local_ip" && continue
+    if ! key_remote_exec "$endpoint" "$key_file" "true" >/dev/null 2>&1; then
+      password_remote_exec "$endpoint" "$remote_command" || {
+        echo "错误: 无法使用首次密码认证向 ${endpoint} 写入 SSH 公钥" >&2
+        return 1
+      }
+    fi
+    key_remote_exec "$endpoint" "$key_file" "true" >/dev/null 2>&1 || {
+      echo "错误: SSH 公钥信任验证失败: ${endpoint}" >&2
+      return 1
+    }
+  done
+  ssh_identity_file="$key_file"
+  echo "SSH 公钥信任已建立，后续远程操作使用: ${ssh_identity_file}"
+}
+
 function remote_exec() {
   local host="$1"; shift
   ensure_ssh_control_dir || return 1
@@ -3328,9 +3492,14 @@ function remote_exec() {
   )
   if [[ -n "$ssh_identity_file" ]]; then
     ssh_args+=(-o IdentitiesOnly=yes -i "$ssh_identity_file")
-  fi
-  if [[ -n "$remote_root_pass" ]]; then
-    SSHPASS="$remote_root_pass" sshpass -e ssh "${ssh_args[@]}" "root@${host}" "$@"
+    ssh_args+=(-o BatchMode=yes)
+    ssh "${ssh_args[@]}" "root@${host}" "$@"
+  elif [[ -n "$remote_root_pass" ]]; then
+    run_with_ssh_password ssh "${ssh_args[@]}" \
+      -o PubkeyAuthentication=no \
+      -o PreferredAuthentications=keyboard-interactive,password \
+      -o NumberOfPasswordPrompts=1 \
+      "root@${host}" "$@"
   else
     ssh_args+=(-o BatchMode=yes)
     ssh "${ssh_args[@]}" "root@${host}" "$@"
@@ -3351,9 +3520,14 @@ function remote_copy() {
   )
   if [[ -n "$ssh_identity_file" ]]; then
     scp_args+=(-o IdentitiesOnly=yes -i "$ssh_identity_file")
-  fi
-  if [[ -n "$remote_root_pass" ]]; then
-    SSHPASS="$remote_root_pass" sshpass -e scp "${scp_args[@]}" "$src" "root@${host}:${dest}"
+    scp_args+=(-o BatchMode=yes)
+    scp "${scp_args[@]}" "$src" "root@${host}:${dest}"
+  elif [[ -n "$remote_root_pass" ]]; then
+    run_with_ssh_password scp "${scp_args[@]}" \
+      -o PubkeyAuthentication=no \
+      -o PreferredAuthentications=keyboard-interactive,password \
+      -o NumberOfPasswordPrompts=1 \
+      "$src" "root@${host}:${dest}"
   else
     scp_args+=(-o BatchMode=yes)
     scp "${scp_args[@]}" "$src" "root@${host}:${dest}"
@@ -4479,6 +4653,9 @@ function calculate_total_steps() {
     total=24
   fi
   [[ "$mongo_tls_enabled" == "Y" ]] && total=$((total + 2))
+  if [[ "$mongo_install_mode" == "replicaset" && -n "$remote_root_pass" && -z "$ssh_identity_file" ]]; then
+    total=$((total + 1))
+  fi
   printf '%d' "$total"
 }
 #==============================================================#
@@ -4949,6 +5126,9 @@ function main() {
   fi
   if [[ "$mongo_install_mode" == "replicaset" ]]; then
     progress_set_stage "集群预检"
+    if [[ -n "$remote_root_pass" && -z "$ssh_identity_file" ]]; then
+      execute_and_log "建立 SSH 公钥信任" bootstrap_ssh_key_trust || return $?
+    fi
     execute_and_log "检查 SSH 与成员 DNS" check_cluster_connectivity || return $?
     progress_set_stage "系统配置"
   fi

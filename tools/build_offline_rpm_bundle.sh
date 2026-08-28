@@ -5,28 +5,24 @@ umask 022
 archive_name="mongdb-offline-rpm.tar.gz"
 output_file="${PWD}/${archive_name}"
 declare -a requested_packages=()
-declare -a default_packages=(
-  bash coreutils findutils gawk grep sed tar gzip shadow-utils util-linux
-  iproute procps-ng systemd openssh-clients openssl cronie logrotate
-  numactl net-tools sysstat lsof libcurl xz-libs cyrus-sasl cyrus-sasl-plain
-  sshpass
-)
+declare -a default_packages=()
 
 usage() {
   cat <<'EOF'
 用法: build_offline_rpm_bundle.sh [选项] [额外软件包...]
 
-在有仓库的目标同版本 RHEL 系列主机上下载 MongoDB 安装器所需的 RPM
-及其依赖，生成 mongdb-offline-rpm.tar.gz。归档内部按 OS 主版本和
+在有仓库的目标同版本 RHEL 系列主机上下载明确指定的 ISO 缺失 RPM 及其依赖，
+生成 mongdb-offline-rpm.tar.gz。当前认证矩阵的完整 DVD ISO 没有缺项；归档内部按 OS 主版本和
 CPU 架构隔离，例如 mongdb-offline-rpm/rhel/9/x86_64/。
 
 选项:
   -o, --output FILE   输出归档路径（默认: 当前目录/mongdb-offline-rpm.tar.gz）
-  -p, --package NAME  额外下载一个软件包，可重复
+  -p, --package NAME  下载一个经 ISO 差集确认的缺失软件包，可重复
   --only NAME         只下载指定软件包；首次使用时清空默认列表，可重复
   -h, --help          显示帮助
 
-软件包版本不在脚本中固定，由构建机当前启用的软件仓库解析。
+至少指定一个 -p/--package 或 --only。软件包版本不在脚本中固定，
+由构建机当前启用的软件仓库解析。
 EOF
 }
 
