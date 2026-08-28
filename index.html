@@ -236,11 +236,11 @@ a:hover { color: var(--mg-primary); }
     <div class="hero-text">
       <div class="hero-badge">
         <span class="hero-badge-dot"></span>
-        一键安装 · 生产就绪
+        灵活认证 · 可审计安装
       </div>
       <h1>MongoDB<br><span class="highlight">一键自动化安装</span></h1>
       <p class="hero-subtitle">
-        支持 <strong>单机 / 副本集</strong> 两种部署模式，<strong>MongoDB 5.x ~ 8.x</strong> 全版本。WiredTiger 版本感知调优，THP 智能管理，NUMA 优化，离线三包安装。支持 RHEL/CentOS/Rocky/Alma/Debian/Ubuntu 等多发行版。
+        支持 <strong>单机 / 副本集</strong> 两种部署模式，可识别 <strong>MongoDB 5.x ~ 8.x</strong> 离线包。默认无认证并监听全部 IPv4，认证可选；提供版本感知 THP、总体进度条、失败即停和密码脱敏日志。
       </p>
       <div class="hero-actions">
         <a href="generator.html" class="btn btn-primary">命令生成器 →</a>
@@ -266,7 +266,7 @@ a:hover { color: var(--mg-primary); }
       </div>
       <div class="stat-item">
         <div class="stat-number">MongoDB 5~8</div>
-        <div class="stat-label">全版本支持</div>
+        <div class="stat-label">版本感知配置</div>
       </div>
       <div class="stat-item">
         <div class="stat-number">10+ 发行版</div>
@@ -290,7 +290,7 @@ a:hover { color: var(--mg-primary); }
       <div class="step-card animate-on-scroll">
         <div class="step-number">1</div>
         <h3>上传软件包</h3>
-        <p>将脚本和 MongoDB 三个离线包（mongodb-server、mongosh、database-tools）上传至服务器 /soft 目录</p>
+        <p>将脚本、MongoDB 三个离线包及可选的 mongdb-offline-rpm.tar.gz 上传至服务器 /soft 目录</p>
       </div>
       <div class="step-card animate-on-scroll">
         <div class="step-number">2</div>
@@ -311,38 +311,38 @@ a:hover { color: var(--mg-primary); }
     <div class="section-header animate-on-scroll">
       <div class="section-eyebrow">核心特性</div>
       <h2 class="section-title">为什么选择 MongoDBShellInstall</h2>
-      <p class="section-desc">经过多版本生产环境验证，专为运维工程师打造的 MongoDB 自动化安装方案</p>
+      <p class="section-desc">面向运维场景的可复核 MongoDB 自动化安装方案</p>
     </div>
     <div class="features-grid">
       <div class="feature-card animate-on-scroll">
         <div class="feature-icon">⚡</div>
         <h3>版本感知配置</h3>
-        <p>根据 MongoDB 版本自动适配配置：6.2+ 移除 journal.enabled，5.0+ 移除 enableMajorityReadConcern，8.0+ 启用 TCMalloc THP</p>
+        <p>根据 MongoDB 版本自动适配配置：6.1+ 移除 journal.enabled，5.0+ 移除 enableMajorityReadConcern，8.0+ 启用 TCMalloc THP</p>
       </div>
       <div class="feature-card animate-on-scroll">
         <div class="feature-icon">🔧</div>
         <h3>WiredTiger 智能调优</h3>
-        <p>根据物理内存自动计算 cacheSizeGB，配置 journalCompressor=snappy，blockCompressor=zstd，directoryForIndexes</p>
+        <p>根据有效内存自动计算 cacheSizeGB，配置 journalCompressor=snappy，blockCompressor=snappy，directoryForIndexes</p>
       </div>
       <div class="feature-card animate-on-scroll">
         <div class="feature-icon">📦</div>
         <h3>OS 深度优化</h3>
-        <p>tcp_keepalive_time、vm.swappiness=1、readahead=16KB、NUMA interleave、THP 版本感知管理，官方生产标准</p>
+        <p>tcp_keepalive_time、vm.swappiness=1、readahead、NUMA、THP 版本感知；安装时关闭防火墙与 SELinux</p>
       </div>
       <div class="feature-card animate-on-scroll">
         <div class="feature-icon">🎯</div>
-        <h3>离线三包安装</h3>
-        <p>支持 mongodb-server、mongosh、database-tools 三个独立离线包，自动识别版本，无需网络连接</p>
+        <h3>完整离线安装</h3>
+        <p>MongoDB 三包自动识别；ISO 缺失依赖使用 mongdb-offline-rpm.tar.gz，并按 OS 主版本与 CPU 架构隔离</p>
       </div>
       <div class="feature-card animate-on-scroll">
         <div class="feature-icon">🛡</div>
         <h3>副本集自动化</h3>
-        <p>keyFile 认证、rs.initiate 自动执行、PRIMARY 选举等待、管理员用户创建，副本集开箱即用</p>
+        <p>DNS 成员、并行远程部署、相同二进制指纹跳过传输；支持 keyFile、可选 TLS/X.509 与管理员认证</p>
       </div>
       <div class="feature-card animate-on-scroll">
         <div class="feature-icon">📄</div>
         <h3>备份与监控脚本</h3>
-        <p>自动生成 mongodump 备份脚本（gzip 压缩）、健康检查脚本（PID / 连接数 / 副本集状态），运维无忧</p>
+        <p>检测到 Database Tools 时启用 mongodump 定时备份，并生成可返回故障状态的健康检查脚本</p>
       </div>
     </div>
   </div>
@@ -360,7 +360,7 @@ a:hover { color: var(--mg-primary); }
         <div class="mode-icon">⚙</div>
         <h3>单机模式</h3>
         <div class="mode-sub">Standalone</div>
-        <p>单节点 MongoDB 部署，适用于开发测试和中小型数据存储场景。支持认证可选开启</p>
+        <p>单节点 MongoDB 部署，适用于开发测试和中小型数据存储场景。默认无认证并监听 0.0.0.0</p>
         <div class="mode-tags">
           <span class="mode-tag">快速部署</span>
           <span class="mode-tag">开发测试</span>
@@ -371,7 +371,7 @@ a:hover { color: var(--mg-primary); }
         <div class="mode-icon">🔰</div>
         <h3>副本集模式</h3>
         <div class="mode-sub">Replica Set</div>
-        <p>多节点副本集集群，自动选举 PRIMARY 节点。推荐 3+ 节点（奇数），支持 keyFile 认证和管理员用户自动创建</p>
+        <p>多节点副本集集群，自动选举 PRIMARY 节点。推荐 3+ 节点（奇数），认证和 keyFile 可选</p>
         <div class="mode-tags">
           <span class="mode-tag">高可用</span>
           <span class="mode-tag">自动故障转移</span>
@@ -402,12 +402,11 @@ a:hover { color: var(--mg-primary); }
         <div class="compat-group">
           <h3>支持的操作系统</h3>
           <div class="compat-tags">
-            <span class="compat-tag">RHEL/CentOS 7/8/9</span>
-            <span class="compat-tag">Rocky/Alma 8/9</span>
-            <span class="compat-tag">Ubuntu 18-24</span>
-            <span class="compat-tag">Debian 10-13</span>
-            <span class="compat-tag">SLES/openSUSE</span>
-            <span class="compat-tag">Amazon Linux</span>
+            <span class="compat-tag highlight">RHEL 8 已验证</span>
+            <span class="compat-tag">RHEL 9 认证测试中</span>
+            <span class="compat-tag">Rocky Linux 8/9 认证测试中</span>
+            <span class="compat-tag">CentOS 7 遗留兼容</span>
+            <span class="compat-tag">其他 Linux 尽力支持</span>
           </div>
         </div>
         <div class="compat-group">
@@ -416,6 +415,7 @@ a:hover { color: var(--mg-primary); }
             <span class="compat-tag highlight">mongodb-server</span>
             <span class="compat-tag highlight">mongosh</span>
             <span class="compat-tag highlight">database-tools</span>
+            <span class="compat-tag highlight">mongdb-offline-rpm</span>
           </div>
         </div>
         <div class="compat-group">
@@ -544,26 +544,19 @@ if (statsGrid) statsObserver.observe(statsGrid);
   var term = document.getElementById('termDemo');
   if (!term) return;
   var lines = [
-    { html: '<span class="prompt">$ </span><span class="cmd">bash MongoDB.sh <span class="param">-m</span> <span class="value">rs</span> <span class="param">-ri</span> <span class="value">10.0.1.1,10.0.1.2,10.0.1.3</span> <span class="param">-rp</span> <span class="value">\'RootPass\'</span> <span class="param">--auth</span> <span class="param">--admin-pass</span> <span class="value">\'Mongo123\'</span></span>', delay: 600 },
+    { html: '<span class="prompt">$ </span><span class="cmd">bash MongoDB.sh <span class="param">-m</span> <span class="value">rs</span> <span class="param">--hosts</span> <span class="value">db1,db2,db3</span> <span class="param">--ssh-key</span> <span class="value">/root/.ssh/id_ed25519</span> <span class="param">--auth</span> <span class="param">--admin-pass-file</span> <span class="value">/root/.mongodb-admin-password</span></span>', delay: 600 },
     { html: '&nbsp;', delay: 400 },
-    { html: '<span class="check">✓</span> <span class="task-name">检测 MongoDB 版本 (8.0.9)</span>', delay: 280 },
-    { html: '<span class="check">✓</span> <span class="task-name">确定部署模式 (Replica Set)</span>', delay: 220 },
-    { html: '<span class="check">✓</span> <span class="task-name">安装系统依赖包</span>', delay: 220 },
-    { html: '<span class="check">✓</span> <span class="task-name">优化内核参数 (THP/NUMA/sysctl)</span>', delay: 220 },
-    { html: '<span class="check">✓</span> <span class="task-name">创建用户和目录</span>', delay: 220 },
-    { html: '<span class="check">✓</span> <span class="task-name">安装 MongoDB Server</span>', delay: 280 },
-    { html: '<span class="check">✓</span> <span class="task-name">安装 mongosh</span>', delay: 220 },
-    { html: '<span class="check">✓</span> <span class="task-name">安装 database-tools</span>', delay: 220 },
-    { html: '<span class="check">✓</span> <span class="task-name">生成 mongod.conf (WiredTiger 调优)</span>', delay: 250 },
-    { html: '<span class="check">✓</span> <span class="task-name">生成 keyFile 认证</span>', delay: 220 },
-    { html: '<span class="check">✓</span> <span class="task-name">创建 systemd 服务</span>', delay: 220 },
-    { html: '<span class="check">✓</span> <span class="task-name">启动 MongoDB 服务</span>', delay: 300 },
-    { html: '<span class="check">✓</span> <span class="task-name">分发并安装远程节点</span>', delay: 350 },
-    { html: '<span class="check">✓</span> <span class="task-name">初始化副本集 (rs.initiate)</span>', delay: 400 },
-    { html: '<span class="check">✓</span> <span class="task-name">等待 PRIMARY 选举完成</span>', delay: 350 },
-    { html: '<span class="check">✓</span> <span class="task-name">创建管理员用户</span>', delay: 280 },
+    { html: '<span class="success-msg">MongoDB 自动安装</span>', delay: 180 },
+    { html: '<span class="task-name">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</span>', delay: 100 },
+    { html: '<span class="task-name">总体进度&nbsp; [████████████░░░░░░░░]&nbsp; 18/30&nbsp; 60%</span>', delay: 180 },
+    { html: '<span class="task-name">当前阶段&nbsp; 系统配置</span>', delay: 140 },
+    { html: '<span class="param">当前操作&nbsp; ⠹ 配置内核参数</span><span class="task-name">&nbsp;&nbsp;00:12</span>', delay: 350 },
+    { html: '<span class="task-name">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</span>', delay: 100 },
+    { html: '<span class="check">✓</span> <span class="task-name">安装系统依赖&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;00:08</span>', delay: 220 },
+    { html: '<span class="check">✓</span> <span class="task-name">关闭防火墙&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;00:04</span>', delay: 220 },
+    { html: '<span class="check">✓</span> <span class="task-name">关闭 SELinux&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;00:01</span>', delay: 220 },
     { html: '&nbsp;', delay: 300 },
-    { html: '<span class="check" style="font-size:14px">◆</span> <span class="success-msg">MongoDB 副本集安装成功！节点数: 3/3</span>', delay: 500 },
+    { html: '<span class="check" style="font-size:14px">◆</span> <span class="success-msg">失败立即停转 · 真实退出码 · 详细日志</span>', delay: 500 },
     { html: '<span class="prompt">$ </span><span class="term-cursor"></span>', delay: 0 },
   ];
   var idx = 0;

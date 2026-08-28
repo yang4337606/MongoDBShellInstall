@@ -160,7 +160,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:100%;pointe
 
 <div class="code-block">
 <div class="code-header"><span class="code-lang">Shell</span><button class="code-copy" onclick="copyCode(this)">复制</button></div>
-<div class="code-body"><span class="g">bash</span> MongoDB.sh <span class="p">-m</span> <span class="v">single</span>        <span class="c"># 单机模式，最简安装</span></div>
+<div class="code-body"><span class="g">bash</span> MongoDB.sh <span class="p">-m</span> <span class="v">single</span></div>
 </div>
 
 <div class="note"><strong>注意：</strong>脚本必须以 root 用户执行。Bash 版本需 >= 4。支持 RHEL/CentOS/Rocky/Alma/Debian/Ubuntu/SLES/Arch 等主流 Linux 发行版。</div>
@@ -174,35 +174,55 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:100%;pointe
   MongoDB.sh                                    <span class="c"># 安装脚本</span>
   mongodb-linux-x86_64-rhel80-8.0.9.tgz         <span class="c"># MongoDB Server 安装包</span>
   mongosh-2.3.8-linux-x64.tgz                   <span class="c"># mongosh 安装包</span>
-  mongodb-database-tools-rhel80-x86_64-100.*.tgz <span class="c"># database-tools 安装包</span></div>
+  mongodb-database-tools-rhel80-x86_64-100.*.tgz <span class="c"># database-tools 安装包</span>
+  mongdb-offline-rpm.tar.gz                     <span class="c"># ISO 缺失的 OS 依赖补充包（可选）</span></div>
 </div>
 
 <h3>系统要求</h3>
 <ul>
 <li>支持的操作系统：RHEL/CentOS 7/8/9、Rocky/Alma 8/9、Ubuntu 18-24、Debian 10-13、SLES/openSUSE、Amazon Linux、Fedora、Arch Linux</li>
-<li>Bash 版本 >= 4，内存 >= 2GB（生产环境建议 >= 8GB）</li>
+<li>Bash 版本 >= 4，脚本最低检查 1GB 内存（生产环境建议至少 8GB）</li>
 <li>磁盘空间：MongoDB 安装约 500MB，数据目录建议使用 XFS 文件系统</li>
-<li>副本集模式：所有节点 root 密码一致，网络互通，仅在第一个节点执行脚本</li>
+<li>副本集模式：所有节点使用可解析的 DNS 主机名，网络互通，SSH 主机密钥已写入 <code>known_hosts</code>，仅在第一个节点执行脚本</li>
 </ul>
 
 <h3>离线安装包</h3>
-<p>MongoDB 离线安装需要三个独立的 tar.gz 包：</p>
+<p>MongoDB Server 包是必需项；MongoDB 6.0+ 还必须提供独立 mongosh 包。Database Tools 可选，但缺少时不会启用自动数据库备份：</p>
 <ul>
 <li><code>mongodb-linux-x86_64-*.tgz</code> - MongoDB Server（包含 mongod）</li>
-<li><code>mongosh-*-linux-x64.tgz</code> - MongoDB Shell（交互式客户端）</li>
-<li><code>mongodb-database-tools-*.tgz</code> - 数据库工具（mongodump / mongorestore 等）</li>
+<li><code>mongosh-*-linux-x64.tgz</code> - MongoDB Shell（MongoDB 6.0+ 必需；旧版可使用 Server 包内的 legacy mongo）</li>
+<li><code>mongodb-database-tools-*.tgz</code> - 数据库工具（可选；自动备份需要 mongodump 100.3.0+）</li>
+<li><code>mongdb-offline-rpm.tar.gz</code> - ISO 中缺失的 OS RPM 及完整依赖闭包（可选）</li>
 </ul>
-<div class="note"><strong>提示：</strong>脚本会自动识别这三个包并分别安装。请确保 Server 包的文件名不包含 "database-tools" 或 "mongosh" 关键字以避免误识别。</div>
+<p>OS 离线包必须按 <strong>OS ID + OS 主版本 + CPU 架构</strong> 隔离。示例结构：</p>
+<div class="code-block">
+<div class="code-header"><span class="code-lang">归档内部目录</span><button class="code-copy" onclick="copyCode(this)">复制</button></div>
+<div class="code-body">mongdb-offline-rpm/
+  rhel/
+    8/x86_64/
+    9/
+      x86_64/
+        manifest.env
+        SHA256SUMS
+        *.rpm
+  rocky/
+    8/x86_64/
+    9/x86_64/
+  centos/
+    7/x86_64/</div>
+</div>
+<p>使用同 OS 主版本和架构、且能访问软件仓库的构建机执行 <code>bash tools/build_offline_rpm_bundle.sh</code>，即可生成上述归档。RPM 版本由构建时启用的仓库解析，不在脚本中固定。安装时先尝试 <code>--os-iso-root</code> 指定的已挂载 ISO，再使用补充包，最后才尝试在线仓库。</p>
+<div class="note"><strong>提示：</strong>只有一个 MongoDB Server 包时自动选择；有多个时交互选择。非交互安装存在多个包时必须通过 <code>--mongo-package</code> 指定文件名或版本。脚本会校验 Server 包和 OS 离线包，Server 包文件名不得包含 "database-tools" 或 "mongosh"。</div>
 
 <h2 id="media">安装介质</h2>
-<p>脚本支持 MongoDB 5.x 至 8.x 全版本。将 <code>.tgz</code> 文件放置在 <code>/soft</code> 目录下，脚本启动后会自动识别版本并生成版本感知的配置文件。</p>
+<p>脚本可识别 MongoDB 5.x 至 8.x 的离线包并生成版本感知配置。生产部署应选用 MongoDB 官方仍在支持期内、且与当前操作系统匹配的版本与构建。</p>
 
 <table class="doc-table">
 <thead><tr><th>MongoDB 版本</th><th>安装包文件名示例</th><th>版本特性</th></tr></thead>
 <tbody>
 <tr><td>8.0</td><td>mongodb-linux-x86_64-rhel80-8.0.9.tgz</td><td>TCMalloc，需启用 THP</td></tr>
 <tr><td>7.0</td><td>mongodb-linux-x86_64-rhel80-7.0.20.tgz</td><td>需禁用 THP</td></tr>
-<tr><td>6.0</td><td>mongodb-linux-x86_64-rhel80-6.0.x.tgz</td><td>6.2+ 移除 journal.enabled 选项</td></tr>
+<tr><td>6.0</td><td>mongodb-linux-x86_64-rhel80-6.0.x.tgz</td><td>6.1+ 移除 journal.enabled 选项</td></tr>
 <tr><td>5.0</td><td>mongodb-linux-x86_64-rhel80-5.0.x.tgz</td><td>enableMajorityReadConcern 始终开启</td></tr>
 </tbody>
 </table>
@@ -212,10 +232,10 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:100%;pointe
 
 <h3>执行流程</h3>
 <ol>
-<li><strong>参数校验</strong> - 验证输入参数、节点 IP 格式和重复检测</li>
+<li><strong>参数校验</strong> - 验证数值范围、安全目录、绑定地址、凭据文件和副本集 DNS 主机名</li>
 <li><strong>安装确认</strong> - 显示安装摘要，等待用户确认</li>
 <li><strong>版本检测</strong> - 解析 MongoDB 安装包版本号，确定版本特性</li>
-<li><strong>OS 优化</strong> - 内核参数、limits、THP、NUMA、readahead、防火墙</li>
+<li><strong>OS 优化</strong> - 内核参数、limits、THP、NUMA、readahead，并停止/禁用防火墙、关闭 SELinux</li>
 <li><strong>用户创建</strong> - 创建 mongod 系统用户，配置目录权限</li>
 <li><strong>MongoDB 安装</strong> - 解压三个离线包，创建二进制符号链接</li>
 <li><strong>配置生成</strong> - 生成版本感知的 mongod.conf（WiredTiger 调优）</li>
@@ -225,13 +245,24 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:100%;pointe
 <li><strong>副本集初始化</strong> - rs.initiate、等待 PRIMARY 选举、创建管理员用户</li>
 </ol>
 
+<h3>安装进度界面</h3>
+<p>交互终端使用总体进度条和当前步骤旋转动画；步骤完成或失败时原地替换。输出被重定向、通过 SSH 执行或指定 <code>--no-progress</code> 时，会自动退化为适合日志采集的逐行格式。</p>
+<div class="code-block"><div class="code-body">MongoDB 自动安装
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+总体进度  [████████████░░░░░░░░]  18/30  60%
+当前阶段  系统配置
+当前操作  ⠹ 配置内核参数                    00:12
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✓ 安装系统依赖                            00:08
+✓ 关闭防火墙                              00:04</div></div>
+
 <h2 id="single">单机安装</h2>
 <p>单机模式是最简单的部署方式，适用于开发测试及中小型数据存储场景。</p>
 
 <h3>最简安装</h3>
 <div class="code-block">
 <div class="code-header"><span class="code-lang">Shell</span><button class="code-copy" onclick="copyCode(this)">复制</button></div>
-<div class="code-body"><span class="g">bash</span> MongoDB.sh <span class="p">-m</span> <span class="v">single</span>              <span class="c"># 最简安装</span></div>
+<div class="code-body"><span class="g">bash</span> MongoDB.sh <span class="p">-m</span> <span class="v">single</span></div>
 </div>
 
 <h3>自定义安装</h3>
@@ -239,82 +270,128 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:100%;pointe
 <div class="code-header"><span class="code-lang">Shell</span><button class="code-copy" onclick="copyCode(this)">复制</button></div>
 <div class="code-body"><span class="g">bash</span> MongoDB.sh \
   <span class="p">-m</span> <span class="v">single</span> \
-  <span class="p">-d</span> <span class="v">/data/mongodb</span> \                <span class="c"># 安装根目录</span>
-  <span class="p">-p</span> <span class="v">27018</span> \                       <span class="c"># MongoDB 端口</span>
-  <span class="p">--max-connections</span> <span class="v">20000</span> \         <span class="c"># 最大连接数</span>
-  <span class="p">--backup-days</span> <span class="v">14</span>                 <span class="c"># 备份保留 14 天</span></div>
+  <span class="p">-d</span> <span class="v">/data/mongodb</span> \
+  <span class="p">-p</span> <span class="v">27018</span> \
+  <span class="p">--max-connections</span> <span class="v">20000</span> \
+  <span class="p">--backup-days</span> <span class="v">14</span></div>
 </div>
 
-<h3>带认证的单机安装</h3>
+<h3>启用认证的非交互安装</h3>
 <div class="code-block">
 <div class="code-header"><span class="code-lang">Shell</span><button class="code-copy" onclick="copyCode(this)">复制</button></div>
 <div class="code-body"><span class="g">bash</span> MongoDB.sh \
   <span class="p">-m</span> <span class="v">single</span> \
-  <span class="p">--auth</span> \                          <span class="c"># 启用认证</span>
-  <span class="p">--admin-user</span> <span class="v">admin</span> \              <span class="c"># 管理员用户名</span>
-  <span class="p">--admin-pass</span> <span class="v">'SecurePass123'</span>     <span class="c"># 管理员密码</span></div>
+  <span class="p">--auth</span> \
+  <span class="p">--admin-user</span> <span class="v">admin</span> \
+  <span class="p">--admin-pass-file</span> <span class="v">/root/.mongodb-admin-password</span> \
+  <span class="p">--yes</span></div>
 </div>
 
-<div class="note"><strong>说明：</strong>单机模式下数据存储在 <code>/mongodb/data</code> 目录，日志存储在 <code>/mongodb/logs</code> 目录。WiredTiger 缓存大小根据物理内存自动计算。</div>
+<h3>应用服务器远程连接</h3>
+<p>默认监听 <code>0.0.0.0</code>，远程应用可直接使用 MongoDB 服务器的可达 IP 连接。默认未启用认证时，连接串无需账号密码：</p>
+<div class="code-block">
+<div class="code-header"><span class="code-lang">URI</span><button class="code-copy" onclick="copyCode(this)">复制</button></div>
+<div class="code-body">mongodb://10.20.0.10:27017/appdb</div>
+</div>
+<p>启用认证后，使用 <code>mongodb://admin:&lt;URL编码密码&gt;@10.20.0.10:27017/admin?authSource=admin&amp;authMechanism=SCRAM-SHA-256</code>。安装摘要会在终端显示管理员账号、密码与认证方式，但密码不会写入脚本生成的详细日志。</p>
+<p>如需只允许本机连接，可显式指定 <code>--bind-ip 127.0.0.1</code>，再通过 SSH 隧道访问：<code>ssh -N -L 27018:127.0.0.1:27017 ops@10.20.0.10</code>。</p>
+<div class="note"><strong>高风险默认值：</strong>脚本默认未认证、未启用 TLS、监听 <code>0.0.0.0</code>，并关闭防火墙与 SELinux。任何网络可达主机都可能读写或删除数据。请仅在隔离网络使用；生产环境应至少启用 <code>--auth</code>，并通过云安全组、上游防火墙或专用网络限制来源。需要传输加密时显式使用 <code>--tls</code>。</div>
+
+<div class="note"><strong>说明：</strong>单机模式下数据存储在 <code>/mongodb/data</code> 目录，日志存储在 <code>/mongodb/logs</code> 目录。WiredTiger 缓存按有效内存自动计算，容器环境会采用 cgroup 内存上限。</div>
 
 <h2 id="replicaset">副本集安装</h2>
 <p>副本集模式是 MongoDB 生产环境推荐的部署方式，提供数据冗余和自动故障转移能力。</p>
 
-<div class="note"><strong>前置条件：</strong>所有节点 root 密码必须一致，网络互通，脚本仅在第一个节点执行。节点数建议奇数（3/5/7）。</div>
+<div class="note"><strong>前置条件：</strong>所有节点必须能相互解析 DNS 主机名，网络互通，SSH 主机密钥须预先核验并写入 <code>known_hosts</code>。推荐 SSH 密钥登录；节点数建议奇数（3/5/7）。</div>
 
 <h3>基础 3 节点副本集</h3>
 <div class="code-block">
 <div class="code-header"><span class="code-lang">Shell</span><button class="code-copy" onclick="copyCode(this)">复制</button></div>
 <div class="code-body"><span class="g">bash</span> MongoDB.sh \
   <span class="p">-m</span> <span class="v">replicaset</span> \
-  <span class="p">-ri</span> <span class="v">192.168.1.11,192.168.1.12,192.168.1.13</span> \
-  <span class="p">-rp</span> <span class="v">'RootPass123'</span> \
+  <span class="p">--hosts</span> <span class="v">db1.example.internal,db2.example.internal,db3.example.internal</span> \
+  <span class="p">--remote-ips</span> <span class="v">10.0.1.11,10.0.1.12,10.0.1.13</span> \
+  <span class="p">--ssh-key</span> <span class="v">/root/.ssh/id_ed25519</span> \
   <span class="p">--auth</span> \
-  <span class="p">--admin-pass</span> <span class="v">'MongoAdmin123'</span></div>
+  <span class="p">--admin-pass-file</span> <span class="v">/root/.mongodb-admin-password</span></div>
 </div>
 
 <h3>自定义副本集配置</h3>
 <div class="code-block">
 <div class="code-header"><span class="code-lang">Shell</span><button class="code-copy" onclick="copyCode(this)">复制</button></div>
 <div class="code-body"><span class="g">bash</span> MongoDB.sh \
-  <span class="p">-m</span> <span class="v">rs</span> \                           <span class="c"># rs 为 replicaset 简写</span>
-  <span class="p">-ri</span> <span class="v">192.168.1.11,192.168.1.12,192.168.1.13</span> \
-  <span class="p">-rp</span> <span class="v">'RootPass123'</span> \
-  <span class="p">-ss</span> <span class="v">22022</span> \                       <span class="c"># SSH 端口</span>
-  <span class="p">-d</span> <span class="v">/data/mongodb</span> \                <span class="c"># 安装根目录</span>
-  <span class="p">-p</span> <span class="v">27017</span> \                       <span class="c"># MongoDB 端口</span>
-  <span class="p">--repl-set</span> <span class="v">myRS</span> \                <span class="c"># 副本集名称</span>
-  <span class="p">--oplog-size</span> <span class="v">4096</span> \              <span class="c"># Oplog 大小 4GB</span>
+  <span class="p">-m</span> <span class="v">rs</span> \
+  <span class="p">--hosts</span> <span class="v">db1.example.internal,db2.example.internal,db3.example.internal</span> \
+  <span class="p">--remote-ips</span> <span class="v">10.0.1.11,10.0.1.12,10.0.1.13</span> \
+  <span class="p">--root-pass-file</span> <span class="v">/root/.mongodb-ssh-password</span> \
+  <span class="p">-ss</span> <span class="v">22022</span> \
+  <span class="p">-d</span> <span class="v">/data/mongodb</span> \
+  <span class="p">-p</span> <span class="v">27017</span> \
+  <span class="p">--repl-set</span> <span class="v">myRS</span> \
+  <span class="p">--oplog-size</span> <span class="v">4096</span> \
   <span class="p">--auth</span> \
-  <span class="p">--admin-pass</span> <span class="v">'MongoAdmin123'</span></div>
+  <span class="p">--admin-pass-file</span> <span class="v">/root/.mongodb-admin-password</span></div>
 </div>
 
 <h3>副本集安装流程</h3>
 <ol>
 <li>主节点完成 OS 优化 + MongoDB 三包安装 + 配置生成</li>
-<li>生成 keyFile（副本集内部认证）</li>
+<li>启用 <code>--auth</code> 时默认生成 keyFile；也可配合 TLS 选择 X.509 节点内部认证</li>
 <li>启动主节点 MongoDB</li>
-<li>scp 整个安装目录到从节点</li>
+<li>并行配置远程节点；远端版本与二进制指纹均一致时跳过重复传输，否则复用主节点的一份压缩包更新</li>
 <li>从节点调整配置（bindIp）并启动</li>
 <li>执行 rs.initiate 初始化副本集</li>
 <li>等待 PRIMARY 选举完成</li>
-<li>创建管理员用户（如启用 --auth）</li>
+<li>启用认证时通过 localhost exception 创建 SCRAM-SHA-256 管理员，并立即验证凭据</li>
 </ol>
+<div class="note"><strong>生产认证建议：</strong>keyFile 仍是默认的节点内部认证方式；通过 <code>--tls --cluster-auth-mode x509</code> 可选择 X.509。证书和 CA 必须由外部 PKI 预先签发，脚本只做有效期、SAN、用途、私钥匹配、成员 O/OU/DC 一致性校验以及安装分发，不签发证书。参见 <a href="https://www.mongodb.com/docs/manual/tutorial/configure-x509-member-authentication/" target="_blank" rel="noopener">官方 X.509 成员认证文档</a>。</div>
+
+<h3>TLS + X.509 副本集</h3>
+<p>证书目录中必须按副本集成员主机名保存 PEM，例如 <code>/root/pki/members/db1.example.internal.pem</code>。每个 PEM 同时包含成员证书和未加密私钥，权限为 600；SAN 必须包含对应主机名和脚本本机引导使用的 <code>127.0.0.1</code>。</p>
+<div class="code-block">
+<div class="code-header"><span class="code-lang">Shell</span><button class="code-copy" onclick="copyCode(this)">复制</button></div>
+<div class="code-body"><span class="g">bash</span> MongoDB.sh \
+  <span class="p">-m</span> <span class="v">replicaset</span> \
+  <span class="p">--hosts</span> <span class="v">db1.example.internal,db2.example.internal,db3.example.internal</span> \
+  <span class="p">--remote-ips</span> <span class="v">10.0.1.11,10.0.1.12,10.0.1.13</span> \
+  <span class="p">--ssh-key</span> <span class="v">/root/.ssh/id_ed25519</span> \
+  <span class="p">--auth</span> \
+  <span class="p">--admin-pass-file</span> <span class="v">/root/.mongodb-admin-password</span> \
+  <span class="p">--tls</span> \
+  <span class="p">--tls-ca-file</span> <span class="v">/root/pki/ca.pem</span> \
+  <span class="p">--tls-cert-dir</span> <span class="v">/root/pki/members</span> \
+  <span class="p">--cluster-auth-mode</span> <span class="v">x509</span></div>
+</div>
 
 <h2 id="params-common">通用参数</h2>
+
+<p>每个长参数都有唯一简写；脚本对长短写法执行完全相同的解析与校验。已有简写保持兼容。</p>
 
 <table class="doc-table">
 <thead><tr><th>参数</th><th>说明</th><th>默认值</th></tr></thead>
 <tbody>
 <tr><td>-h, --help</td><td>显示帮助信息</td><td>-</td></tr>
 <tr><td>-m, --mode</td><td>安装模式：single / replicaset（支持简写 si / rs）</td><td>交互选择</td></tr>
-<tr><td>-n, --hostname</td><td>主机名（单机直接使用；多节点作为前缀）</td><td>mongodb</td></tr>
+<tr><td>-n, --hostname</td><td>单机主机名；副本集节点主机名前缀（自动追加本机 IPv4 第三、四段）</td><td>mongodb</td></tr>
 <tr><td>-p, --port</td><td>MongoDB 端口</td><td>27017</td></tr>
-<tr><td>-d, --dir</td><td>安装根目录</td><td>/mongodb</td></tr>
-<tr><td>-ou, --owner</td><td>系统用户名</td><td>mongod</td></tr>
-<tr><td>--os-only</td><td>仅配置操作系统，不安装 MongoDB</td><td>N</td></tr>
-<tr><td>--debug</td><td>开启调试模式</td><td>N</td></tr>
-<tr><td>--backup-days</td><td>备份保留天数</td><td>7</td></tr>
+<tr><td>-d, --dir, --install-dir</td><td>安装根目录；<code>--dir</code> 与 <code>--install-dir</code> 共用 <code>-d</code></td><td>/mongodb</td></tr>
+<tr><td>-dd, --data-dir</td><td>独立数据根目录，实际 WiredTiger <code>dbPath</code> 为 <code>&lt;DIR&gt;/db</code></td><td>&lt;安装根目录&gt;/data</td></tr>
+<tr><td>-bd, --backup-dir</td><td>mongodump 压缩归档保存目录，可放到独立备份盘</td><td>&lt;安装根目录&gt;/backup</td></tr>
+<tr><td>-ou, --owner</td><td>MongoDB 运行用户及同名主组；安装器将该用户的主组设为同名组，所有 MongoDB 托管目录和文件统一使用 <code>USER:USER</code>。优先使用 UID/GID 60300，已被其他账号占用时自动分配可用的系统 UID/GID</td><td>mongod</td></tr>
+<tr><td>-bi, --bind-ip</td><td>MongoDB 监听地址；允许 <code>0.0.0.0</code>，暂不支持 <code>::</code> 或 <code>*</code></td><td>0.0.0.0</td></tr>
+<tr><td>-as, --allow-source</td><td>兼容旧命令保留；因安装器会关闭防火墙，该参数不创建规则</td><td>-</td></tr>
+<tr><td>-oo, --os-only</td><td>仅配置操作系统，不安装 MongoDB</td><td>N</td></tr>
+<tr><td>-mv, --mongo-version</td><td>OS-only 模式的目标版本，用于选择正确 THP 策略</td><td>未知时保持 THP</td></tr>
+<tr><td>-mp, --mongo-package</td><td>多个 MongoDB Server 包时指定文件名或版本；只有一个时自动选择</td><td>自动/交互选择</td></tr>
+<tr><td>-oir, --os-iso-root</td><td>已挂载 OS ISO 根目录；优先从 ISO 安装系统依赖</td><td>-</td></tr>
+<tr><td>-opd, --os-packages-dir</td><td>已解压 OS 离线补充包的平台目录（高级覆盖）</td><td>归档内自动匹配</td></tr>
+<tr><td>-dbg, --debug</td><td>开启调试模式</td><td>N</td></tr>
+<tr><td>-np, --no-progress</td><td>禁用 ANSI 动画，使用逐行日志输出</td><td>自动检测</td></tr>
+<tr><td>-y, --yes</td><td>非交互确认安装</td><td>N</td></tr>
+<tr><td>-br, --backup-days</td><td>备份保留天数</td><td>7</td></tr>
+<tr><td>-t, --tls / -nt, --no-tls</td><td>强制 TLS / 关闭 TLS</td><td>关闭</td></tr>
+<tr><td>-tca, --tls-ca-file</td><td>用于校验服务端和成员证书的 CA PEM</td><td>-</td></tr>
+<tr><td>-tck, --tls-cert-key-file</td><td>单机模式证书与未加密私钥合并 PEM（权限 600）</td><td>-</td></tr>
 </tbody>
 </table>
 
@@ -324,24 +401,33 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:100%;pointe
 <table class="doc-table">
 <thead><tr><th>参数</th><th>说明</th><th>默认值</th></tr></thead>
 <tbody>
-<tr><td>-ri, --remote-ips</td><td>副本集节点 IP（逗号分隔，包含本机 IP）</td><td>-</td></tr>
-<tr><td>-rp, --root-pass</td><td>远程节点 root 密码（副本集模式必填）</td><td>-</td></tr>
+<tr><td>-H, --hosts</td><td>副本集 DNS 主机名（逗号分隔，按节点顺序）</td><td>-</td></tr>
+<tr><td>-ri, --remote-ips</td><td>逐节点 SSH 端点/IP；数量和顺序必须与 <code>--hosts</code> 一致</td><td>未指定时回退使用成员名</td></tr>
+<tr><td>-sk, --ssh-key</td><td>远程 root SSH 私钥（推荐）</td><td>默认 SSH 密钥/agent</td></tr>
+<tr><td>-rpf, --root-pass-file</td><td>远程 root 密码文件（权限建议 600）</td><td>-</td></tr>
+<tr><td>-rp, --root-pass</td><td>兼容参数；不推荐，值可能进入 shell 历史</td><td>-</td></tr>
 <tr><td>-ss, --ssh-port</td><td>SSH 端口</td><td>22</td></tr>
-<tr><td>--repl-set</td><td>副本集名称</td><td>rs0</td></tr>
-<tr><td>--oplog-size</td><td>Oplog 大小（MB，0 表示自动计算）</td><td>0（自动）</td></tr>
+<tr><td>-kh, --known-hosts</td><td>经过核验的 SSH 主机密钥文件</td><td>~/.ssh/known_hosts</td></tr>
+<tr><td>-rs, --repl-set</td><td>副本集名称</td><td>rs0</td></tr>
+<tr><td>-op, --oplog-size</td><td>Oplog 大小（MB，0 表示自动计算）</td><td>0（自动）</td></tr>
+<tr><td>-j, --remote-parallelism</td><td>远程节点并行部署上限（1-32）</td><td>4</td></tr>
+<tr><td>-tcd, --tls-cert-dir</td><td>成员 PEM 目录，文件名必须为 <code>&lt;主机名&gt;.pem</code></td><td>-</td></tr>
+<tr><td>-cam, --cluster-auth-mode</td><td>节点内部认证：keyFile / x509；x509 要求同时启用认证和 TLS</td><td>keyFile</td></tr>
 </tbody>
 </table>
 
-<div class="note"><strong>注意：</strong><code>-ri</code> 第一个 IP 为主节点（执行脚本的节点）。主机名自动使用 IP 后两段作为后缀（如 192.168.1.11 对应 <code>mongodb1011</code>）。</div>
+<div class="note"><strong>注意：</strong><code>--hosts</code> 写入 MongoDB 副本集配置，<code>--remote-ips</code> 仅用于 SSH 分发，两者按位置一一对应且必须包含当前节点。脚本会备份并维护本机和远端的 <code>/etc/hosts</code> 映射，再验证全部成员名解析；不会使用 <code>StrictHostKeyChecking=no</code> 绕过 SSH 主机校验。</div>
 
 <h2 id="params-auth">认证参数</h2>
 
 <table class="doc-table">
 <thead><tr><th>参数</th><th>说明</th><th>默认值</th></tr></thead>
 <tbody>
-<tr><td>--auth</td><td>启用认证（副本集模式自动启用 keyFile 认证）</td><td>N</td></tr>
-<tr><td>--admin-user</td><td>管理员用户名</td><td>admin</td></tr>
-<tr><td>--admin-pass</td><td>管理员密码（启用认证时必填）</td><td>-</td></tr>
+<tr><td>-a, --auth</td><td>启用 SCRAM-SHA-256 用户名/密码认证；副本集内部默认使用 keyFile，也可选 X.509</td><td>N（可选）</td></tr>
+<tr><td>-na, --no-auth</td><td>关闭认证，单机与副本集均可使用</td><td>默认</td></tr>
+<tr><td>-au, --admin-user</td><td>管理员用户名</td><td>admin</td></tr>
+<tr><td>-apf, --admin-pass-file</td><td>管理员密码文件；启用认证的非交互安装推荐，权限建议 600</td><td>交互安全输入</td></tr>
+<tr><td>-ap, --admin-pass</td><td>直接提供管理员密码；值可能进入 shell 历史和进程参数</td><td>-</td></tr>
 </tbody>
 </table>
 
@@ -350,55 +436,58 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:100%;pointe
 <table class="doc-table">
 <thead><tr><th>参数</th><th>说明</th><th>默认值</th></tr></thead>
 <tbody>
-<tr><td>--max-connections</td><td>最大连接数</td><td>65536</td></tr>
+<tr><td>-mc, --max-connections</td><td>最大连接数</td><td>65536</td></tr>
 </tbody>
 </table>
+
+<div class="note"><strong>计时与恢复边界：</strong>安装脚本仅在当前进程内维护进度步骤计时和总耗时，并在终端摘要显示；不会写入持久化耗时历史。脚本只生成并执行备份能力，不自动恢复数据。恢复演练应由外部运维流程在隔离命名空间完成并核对数据。</div>
+<div class="note"><strong>目录说明：</strong><code>--data-dir</code> 和 <code>--backup-dir</code> 与 <code>-d</code> 参数顺序无关。三者均执行绝对路径、高风险根目录和目录重叠检查；数据目录位于安装根目录之外时，systemd 的可写路径也会同步更新。</div>
 
 <h2 id="compat-version">版本特性矩阵</h2>
 <p>脚本会根据 MongoDB 版本自动调整配置，以下是版本差异说明：</p>
 
 <table class="doc-table">
-<thead><tr><th>配置项</th><th>MongoDB 5.0</th><th>MongoDB 6.0-6.1</th><th>MongoDB 6.2+</th><th>MongoDB 7.0</th><th>MongoDB 8.0+</th></tr></thead>
+<thead><tr><th>配置项</th><th>MongoDB 5.0</th><th>MongoDB 6.0</th><th>MongoDB 6.1+</th><th>MongoDB 7.0</th><th>MongoDB 8.0+</th></tr></thead>
 <tbody>
 <tr><td>storage.journal.enabled</td><td>可配置</td><td>可配置</td><td>已移除（始终开启）</td><td>已移除</td><td>已移除</td></tr>
 <tr><td>enableMajorityReadConcern</td><td>始终开启，不可配置</td><td>同左</td><td>同左</td><td>同左</td><td>同左</td></tr>
 <tr><td>Transparent Huge Pages</td><td>禁用</td><td>禁用</td><td>禁用</td><td>禁用</td><td>启用（TCMalloc）</td></tr>
-<tr><td>tcmallocReleaseRate</td><td>-</td><td>-</td><td>-</td><td>-</td><td>5.0</td></tr>
 </tbody>
 </table>
 
 <h2 id="compat-os">操作系统支持</h2>
 
 <table class="doc-table">
-<thead><tr><th>发行版家族</th><th>支持的版本</th><th>包管理器</th></tr></thead>
+<thead><tr><th>平台</th><th>MongoDB 范围</th><th>认证级别</th><th>包管理器</th></tr></thead>
 <tbody>
-<tr><td>RHEL/CentOS</td><td>7, 8, 9</td><td>yum / dnf</td></tr>
-<tr><td>Rocky/AlmaLinux</td><td>8, 9</td><td>dnf</td></tr>
-<tr><td>Ubuntu</td><td>18.04, 20.04, 22.04, 24.04</td><td>apt</td></tr>
-<tr><td>Debian</td><td>10, 11, 12, 13</td><td>apt</td></tr>
-<tr><td>openSUSE/SLES</td><td>12, 15</td><td>zypper</td></tr>
-<tr><td>Amazon Linux</td><td>2, 2023</td><td>yum / dnf</td></tr>
-<tr><td>Fedora</td><td>最新</td><td>dnf</td></tr>
-<tr><td>Arch Linux</td><td>最新</td><td>pacman</td></tr>
+<tr><td>RHEL 8 x86_64</td><td>6.0、7.0、8.0、8.3</td><td>实机已验证</td><td>dnf</td></tr>
+<tr><td>RHEL 9 x86_64</td><td>6.0、7.0、8.0、8.3</td><td>认证测试中</td><td>dnf</td></tr>
+<tr><td>Rocky Linux 8/9 x86_64</td><td>6.0、7.0、8.0、8.3</td><td>认证测试中</td><td>dnf</td></tr>
+<tr><td>CentOS 7 x86_64</td><td>6.0、7.0；拒绝 8.x</td><td>遗留兼容</td><td>yum</td></tr>
+<tr><td>其他已识别 Linux 家族</td><td>由二进制探测决定</td><td>未认证、尽力支持</td><td>按发行版选择</td></tr>
 </tbody>
 </table>
 
-<div class="note"><strong>提示：</strong>MongoDB 官方支持平台为 RHEL 8/9、Ubuntu 22.04/24.04、Debian 11/12、SLES 15、Amazon Linux 2023。其他发行版为社区支持，脚本已做适配但不保证所有功能。</div>
+<div class="note"><strong>版本边界：</strong>MongoDB 8.x 在 RHEL 兼容平台要求 8.8+ 或 9.3+；9 系平台安装 MongoDB 6.0 时要求 6.0.4+。CentOS 7 已结束维护，仅保留 MongoDB 6.0/7.0 遗留安装，不应作为新生产部署。高版本限制只作用于对应版本区间，不会从旧版配置中全局删除仍受支持的参数。</div>
 
 <h2 id="optimization">系统优化说明</h2>
 <p>脚本会自动完成以下操作系统级优化（遵循 MongoDB 官方生产部署建议）：</p>
 <ul>
 <li><strong>vm.swappiness=1</strong> - 最小化 swap 使用</li>
 <li><strong>tcp_keepalive_time=120</strong> - MongoDB 推荐值</li>
-<li><strong>vm.max_map_count=262144</strong> - 支持大量映射文件</li>
+<li><strong>vm.max_map_count</strong> - 仅在当前值不足 262144 时提高，不降低系统已有值</li>
 <li><strong>readahead=16KB</strong> - WiredTiger 推荐值（8-32 范围）</li>
 <li><strong>vm.zone_reclaim_mode=0</strong> - 禁用 NUMA zone reclaim</li>
-<li><strong>dirty_expire_centisecs=3000</strong> - 优化脏页过期时间</li>
 <li><strong>NUMA interleave</strong> - numactl --interleave=all 启动 mongod</li>
 <li><strong>THP 版本感知</strong> - MongoDB 8.0+ 启用 THP（TCMalloc），7.0- 禁用 THP</li>
-<li><strong>limits 配置</strong> - nofile 65535, nproc 65535, memlock unlimited, core unlimited</li>
+<li><strong>limits 资源联动</strong> - 根据 <code>maxIncomingConnections</code>、CPU 数量和 <code>fs.nr_open</code> 计算 nofile/nproc，并按官方要求配置 fsize、cpu、as、memlock 为 unlimited</li>
+<li><strong>WiredTiger 内存联动</strong> - 按官方默认公式基于物理内存计算缓存并为 OS 文件缓存保留空间，不盲目放大</li>
+<li><strong>Oplog 磁盘联动</strong> - 副本集未显式指定时按数据盘可用空间计算，并设置合理上下限</li>
+<li><strong>保守网络/内核调整</strong> - 只提高不足的队列、文件和进程容量，不覆盖自适应 TCP 缓冲、TIME_WAIT 或脏页策略</li>
 <li><strong>XFS 文件系统</strong> - 推荐使用 XFS 作为数据目录文件系统</li>
+<li><strong>系统安全策略</strong> - 停止并禁用 firewalld/ufw/iptables/nftables，当前会话将 SELinux 切换为 Permissive，并配置重启后完全关闭</li>
 </ul>
+<p>参数依据：<a href="https://www.mongodb.com/docs/manual/administration/production-notes/" target="_blank" rel="noopener">Production Notes</a>、<a href="https://www.mongodb.com/docs/manual/reference/ulimit/" target="_blank" rel="noopener">UNIX ulimit Settings</a>、<a href="https://www.mongodb.com/docs/v8.0/administration/production-checklist-operations/" target="_blank" rel="noopener">Operations Checklist</a>。脚本只修改已登记且能判定适用范围的参数，不会因高版本移除某选项而从其他受支持版本全局删除。</p>
 
 <h2 id="troubleshoot">故障排查</h2>
 
@@ -413,21 +502,22 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:100%;pointe
 <h4>副本集初始化失败</h4>
 <ul>
 <li>确认所有节点 MongoDB 已启动并可 ping 通</li>
+<li>MongoDB 5.0+ 必须使用 DNS 主机名，并确保每个节点都能解析全部成员</li>
 <li>检查所有节点的 <code>replSetName</code> 配置一致</li>
-<li>验证 keyFile 权限为 400 且内容一致</li>
+<li>keyFile 模式验证权限为 400 且内容一致；X.509 模式验证各成员证书链、SAN、用途和 O/OU/DC 一致</li>
 <li>确认节点间端口互通：<code>nc -zv peer_ip 27017</code></li>
 </ul>
 
 <h4>认证失败</h4>
 <ul>
-<li>确认使用 <code>--auth</code> 和 <code>--admin-pass</code> 参数</li>
-<li>连接时使用：<code>mongosh --host IP --port 27017 -u admin -p 'password' --authenticationDatabase admin</code></li>
-<li>副本集模式下 keyFile 路径和权限：<code>chmod 400 /mongodb/keyfile && chown mongod /mongodb/keyfile</code></li>
+<li>确认密码文件为普通文件、非符号链接，且权限为 <code>600</code></li>
+<li>连接时使用：<code>mongosh --host 127.0.0.1 --port 27017 -u admin --password --authenticationDatabase admin --authenticationMechanism SCRAM-SHA-256</code>，随后交互输入密码</li>
+<li>副本集模式下 keyFile 权限应为 400，属主和属组都应为 <code>--owner</code> 指定用户，例如：<code>chown mongoops:mongoops /mongodb/keyfile &amp;&amp; chmod 400 /mongodb/keyfile</code></li>
 </ul>
 
 <h4>版本配置不兼容</h4>
 <ul>
-<li>MongoDB 6.2+ 不支持 <code>storage.journal.enabled</code> 选项，脚本已自动处理</li>
+<li>MongoDB 6.1+ 不支持 <code>storage.journal.enabled</code> 选项，脚本已自动处理</li>
 <li>MongoDB 8.0+ 需要启用 THP，脚本已自动检测版本并配置</li>
 <li>MongoDB 5.0+ 的 <code>enableMajorityReadConcern</code> 始终为 true，无需配置</li>
 </ul>
@@ -435,13 +525,13 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:100%;pointe
 <h2 id="faq">常见问题</h2>
 
 <h4>Q: 支持哪些 MongoDB 版本？</h4>
-<p>支持 MongoDB 5.x 至 8.x 全版本。脚本会根据版本自动调整配置参数（journal、THP、TCMalloc 等）。</p>
+<p>脚本可识别 MongoDB 5.x 至 8.x 安装包。生产环境应使用 MongoDB 官方仍在支持期内、且适配当前操作系统的版本。</p>
 
 <h4>Q: 为什么需要三个安装包？</h4>
 <p>从 MongoDB 4.4 开始，MongoDB 官方将 Server、mongosh 和 database-tools 拆分为独立发布包。脚本自动识别并安装这三个包。</p>
 
 <h4>Q: 是否支持离线安装？</h4>
-<p>支持。将三个 tar.gz 安装包上传至 <code>/soft</code> 目录即可，无需网络连接。系统依赖（numactl 等）需通过本地包源或提前安装。</p>
+<p>支持。将 MongoDB 的 Server、mongosh、database-tools 包放入 <code>/soft</code>；ISO 缺失的系统依赖使用 <code>mongdb-offline-rpm.tar.gz</code>。安装器仅加载与当前 <code>OS ID/主版本/CPU 架构</code> 完全匹配的目录，例如 <code>mongdb-offline-rpm/rhel/9/x86_64/</code>，防止跨平台混装。</p>
 
 <h4>Q: WiredTiger 缓存大小如何计算？</h4>
 <p>脚本按照 MongoDB 官方建议自动计算：<code>max(0.25GB, (totalRAM - 1GB) * 0.5)</code>。如物理内存 16GB 则缓存约 7.5GB。</p>
@@ -449,18 +539,38 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:100%;pointe
 <h4>Q: 为什么 MongoDB 8.0 要启用 THP？</h4>
 <p>MongoDB 8.0 将内存分配器切换为 Google TCMalloc（取代 jemalloc/glibc），TCMalloc 与 THP 配合可提升内存分配效率。7.0 及更早版本仍应禁用 THP。</p>
 
-<h4>Q: mongod 用户可以登录吗？</h4>
-<p>不可以。脚本创建的 mongod 用户 shell 为 <code>/sbin/nologin</code>，这是一个纯服务用户。MongoDB 通过 systemd（<code>User=mongod</code>）启动。</p>
+<h4>Q: --owner 指定的用户可以登录吗？</h4>
+<p>不可以。脚本为该用户配置 <code>/sbin/nologin</code> 并锁定密码，将其同名组设为主组。MongoDB 通过 systemd 以同一用户和组（例如 <code>User=mongoops</code>、<code>Group=mongoops</code>）运行。</p>
 
 <h2 id="changelog">更新日志</h2>
+
+<h3>v2.0.0 (2026-08)</h3>
+<ul>
+<li>新增总体进度条、当前步骤旋转动画、原地完成/失败状态及非 TTY 逐行退化</li>
+<li>失败立即终止并保留真实退出码，详细输出统一写入安装日志</li>
+<li>默认关闭认证并监听 <code>0.0.0.0</code>；可通过 <code>--auth</code>、<code>--admin-pass</code> 或 <code>--admin-pass-file</code> 启用 SCRAM-SHA-256 认证</li>
+<li>新增管理员与 SSH 密码文件参数，SSH 密钥优先并强制校验主机密钥</li>
+<li>副本集改用 DNS 主机名，修复 MongoDB 5.0+ 纯 IP 成员不兼容</li>
+<li>安装时停止并禁用防火墙、关闭 SELinux；定时任务改为 mongod 非特权用户执行</li>
+<li>修复 MongoDB 6.1 journal 选项边界与远程节点 THP 版本判断</li>
+<li>安装目录加入高风险路径保护，不再递归改写根目录权限</li>
+<li>单机默认主机名为 mongodb，副本集按本机 IP 后两段生成节点主机名；cron、systemd、sysctl 与安装包错误不再静默成功</li>
+<li>认证安装摘要显示管理员账号、密码和认证方式，步骤日志对管理员密码与远程 root 密码统一脱敏</li>
+<li>OS 内核、limits、WiredTiger cache 和副本集 oplog 改为随 CPU、内存、连接数、内核上限及磁盘可用空间联动</li>
+<li>远程节点并行部署并复用受保护的 SSH 连接；同版本且二进制指纹一致时跳过重复传输，一份压缩包由并行任务复用</li>
+<li>新增可选 TLS 与 X.509 成员认证；证书由外部 PKI 签发，脚本负责严格校验、安装和分发</li>
+<li>安装耗时仅作为进度界面的运行期状态并在最终摘要显示，不在安装脚本中持久化历史</li>
+<li>备份脚本保持单向备份职责，恢复由外部运维演练验证</li>
+<li>修复非特权 cron/手工执行 mongosh 时继承不可访问工作目录导致的监控认证失败</li>
+</ul>
 
 <h3>v1.0.0 (2026-04)</h3>
 <ul>
 <li>初始版本发布</li>
 <li>支持单机 / 副本集双模式部署</li>
-<li>MongoDB 5.x~8.x 全版本支持</li>
-<li>版本感知配置：6.2+ journal 移除、8.0+ THP/TCMalloc、5.0+ majorityReadConcern</li>
-<li>WiredTiger 调优：cacheSizeGB 自动计算、journalCompressor=snappy、blockCompressor=zstd</li>
+<li>MongoDB 5.x~8.x 版本感知配置</li>
+<li>版本感知配置：6.1+ journal 移除、8.0+ THP/TCMalloc、5.0+ majorityReadConcern</li>
+<li>WiredTiger 调优：cacheSizeGB 自动计算、journalCompressor=snappy、blockCompressor=snappy</li>
 <li>三包离线安装：mongodb-server / mongosh / database-tools</li>
 <li>NUMA interleave 优化（numactl --interleave=all）</li>
 <li>THP 版本感知管理（8.0+ 启用，7.0- 禁用）</li>

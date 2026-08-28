@@ -82,6 +82,7 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;point
 .terminal-btn{flex:1;padding:8px 0;border-radius:var(--radius-sm);font-size:12px;font-weight:600;cursor:pointer;transition:all var(--transition-fast);border:none;font-family:var(--font-body)}
 .terminal-btn.copy{background:var(--mg-primary);color:#fff}
 .terminal-btn.copy:hover{background:var(--mg-dark)}
+.terminal-btn:disabled{opacity:.5;cursor:not-allowed}
 .terminal-btn.reset{background:rgba(255,255,255,.08);color:rgba(255,255,255,.6);border:1px solid rgba(255,255,255,.12)}
 .terminal-btn.reset:hover{background:rgba(255,255,255,.12);color:#fff}
 .footer{border-top:1px solid var(--border-color);padding:40px 0 24px;margin-top:60px}
@@ -161,20 +162,36 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;point
         <div class="form-section-title"><span class="icon">◆</span> 基础配置</div>
         <div class="form-grid">
           <div class="form-group">
-            <label><span class="param">-n</span> 主机名前缀</label>
-            <input type="text" id="f-n" placeholder="默认: mongodb" oninput="updateCmd()">
+            <label><span class="param">-n / --hostname</span> 主机名 / 副本集前缀（可选）</label>
+            <input type="text" id="f-n" placeholder="默认: mongodb；副本集自动追加 IP 后两段" oninput="updateCmd()">
           </div>
           <div class="form-group">
-            <label><span class="param">-d</span> 安装根目录</label>
+            <label><span class="param">-d / --dir</span> 安装根目录</label>
             <input type="text" id="f-d" placeholder="默认: /mongodb" oninput="updateCmd()">
           </div>
           <div class="form-group">
-            <label><span class="param">-p</span> MongoDB 端口</label>
+            <label><span class="param">-dd / --data-dir</span> 数据根目录</label>
+            <input type="text" id="f-data-dir" placeholder="默认: <安装根目录>/data；dbPath 为 DIR/db" oninput="updateCmd()">
+          </div>
+          <div class="form-group">
+            <label><span class="param">-bd / --backup-dir</span> 备份归档目录</label>
+            <input type="text" id="f-backup-dir" placeholder="默认: <安装根目录>/backup" oninput="updateCmd()">
+          </div>
+          <div class="form-group">
+            <label><span class="param">-p / --port</span> MongoDB 端口</label>
             <input type="text" id="f-p" placeholder="默认: 27017" oninput="updateCmd()">
           </div>
           <div class="form-group">
-            <label><span class="param">-ou</span> 系统用户名</label>
+            <label><span class="param">-ou / --owner</span> 运行用户及同名主组</label>
             <input type="text" id="f-ou" placeholder="默认: mongod" oninput="updateCmd()">
+          </div>
+          <div class="form-group full">
+            <label><span class="param">-bi / --bind-ip</span> MongoDB 监听地址</label>
+            <input type="text" id="f-bind" placeholder="默认: 0.0.0.0（监听全部 IPv4 地址）" oninput="updateCmd()">
+          </div>
+          <div class="form-group full">
+            <label><span class="param">-as / --allow-source</span> 兼容参数（防火墙关闭时忽略）</label>
+            <input type="text" id="f-source" placeholder="保留用于兼容旧命令，不会创建防火墙规则" oninput="updateCmd()">
           </div>
         </div>
       </div>
@@ -183,16 +200,42 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;point
         <div class="form-section-title"><span class="icon">🔒</span> 认证配置</div>
         <div class="form-grid">
           <div class="form-group">
-            <label><span class="param">--auth</span> 启用认证</label>
-            <select id="f-auth" onchange="updateCmd()"><option value="">否</option><option value="Y">是</option></select>
+            <label><span class="param">-a / --auth</span> 启用认证</label>
+            <select id="f-auth" onchange="updateCmd()"><option value="N" selected>否（默认）</option><option value="Y">是（SCRAM-SHA-256）</option></select>
           </div>
           <div class="form-group conditional-section" id="adminUserGroup">
-            <label><span class="param">--admin-user</span> 管理员用户名</label>
+            <label><span class="param">-au / --admin-user</span> 管理员用户名</label>
             <input type="text" id="f-admin-user" placeholder="默认: admin" oninput="updateCmd()">
           </div>
           <div class="form-group conditional-section" id="adminPassGroup">
-            <label><span class="req">*</span><span class="param">--admin-pass</span> 管理员密码</label>
-            <input type="text" id="f-admin-pass" placeholder="启用认证时必填" oninput="updateCmd()">
+            <label><span class="req">*</span><span class="param">-ap / --admin-pass</span> 管理员密码</label>
+            <input type="password" id="f-admin-pass" autocomplete="new-password" placeholder="至少 12 个字符；安装摘要会显示，详细日志会脱敏" oninput="updateCmd()">
+          </div>
+        </div>
+      </div>
+
+      <div class="form-section">
+        <div class="form-section-title"><span class="icon">🛡</span> TLS / X.509（可选）</div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label><span class="param">-t / --tls</span> 强制 TLS</label>
+            <select id="f-tls" onchange="updateCmd()"><option value="N" selected>否（默认）</option><option value="Y">是（requireTLS）</option></select>
+          </div>
+          <div class="form-group conditional-section" id="tlsCaGroup">
+            <label><span class="req">*</span><span class="param">-tca / --tls-ca-file</span> CA 证书</label>
+            <input type="text" id="f-tls-ca" placeholder="例如: /root/pki/ca.pem" oninput="updateCmd()">
+          </div>
+          <div class="form-group conditional-section" id="tlsSingleCertGroup">
+            <label><span class="req">*</span><span class="param">-tck / --tls-cert-key-file</span> 服务端证书和私钥</label>
+            <input type="text" id="f-tls-cert" placeholder="PEM 同时包含证书和未加密私钥" oninput="updateCmd()">
+          </div>
+          <div class="form-group conditional-section" id="tlsClusterCertGroup">
+            <label><span class="req">*</span><span class="param">-tcd / --tls-cert-dir</span> 成员证书目录</label>
+            <input type="text" id="f-tls-cert-dir" placeholder="每个成员使用 <主机名>.pem" oninput="updateCmd()">
+          </div>
+          <div class="form-group conditional-section" id="clusterAuthGroup">
+            <label><span class="param">-cam / --cluster-auth-mode</span> 节点内部认证</label>
+            <select id="f-cluster-auth" onchange="updateCmd()"><option value="keyFile" selected>keyFile（默认）</option><option value="x509">X.509</option></select>
           </div>
         </div>
       </div>
@@ -201,11 +244,11 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;point
         <div class="form-section-title"><span class="icon">📦</span> MongoDB 配置</div>
         <div class="form-grid">
           <div class="form-group">
-            <label><span class="param">--max-connections</span> 最大连接数</label>
+            <label><span class="param">-mc / --max-connections</span> 最大连接数</label>
             <input type="number" id="f-maxconn" placeholder="默认: 65536" min="100" oninput="updateCmd()">
           </div>
           <div class="form-group">
-            <label><span class="param">--backup-days</span> 备份保留 (天)</label>
+            <label><span class="param">-br / --backup-days</span> 备份保留 (天)</label>
             <input type="number" id="f-backup" placeholder="默认: 7" min="1" oninput="updateCmd()">
           </div>
         </div>
@@ -216,24 +259,36 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;point
           <div class="form-section-title"><span class="icon">🔗</span> 副本集参数</div>
           <div class="form-grid">
             <div class="form-group full">
-              <label><span class="req">*</span><span class="param">-ri</span> 副本集节点 IP</label>
-              <input type="text" id="f-ri" placeholder="例如: 192.168.1.11,192.168.1.12,192.168.1.13" oninput="updateCmd()">
+              <label><span class="req">*</span><span class="param">-H / --hosts</span> 副本集 DNS 主机名</label>
+              <input type="text" id="f-hosts" placeholder="例如: db1.example.internal,db2.example.internal,db3.example.internal" oninput="updateCmd()">
+            </div>
+            <div class="form-group full">
+              <label><span class="req">*</span><span class="param">-ri / --remote-ips</span> 对应 SSH 端点 / IP</label>
+              <input type="text" id="f-remote-ips" placeholder="例如: 10.0.1.11,10.0.1.12,10.0.1.13（顺序与 --hosts 一致）" oninput="updateCmd()">
             </div>
             <div class="form-group">
-              <label><span class="req">*</span><span class="param">-rp</span> 远程 root 密码</label>
-              <input type="text" id="f-rp" placeholder="所有节点 root 密码需一致" oninput="updateCmd()">
+              <label><span class="param">-sk / --ssh-key</span> root SSH 私钥</label>
+              <input type="text" id="f-ssh-key" placeholder="推荐: /root/.ssh/id_ed25519" oninput="updateCmd()">
             </div>
             <div class="form-group">
-              <label><span class="param">-ss</span> SSH 端口</label>
+              <label><span class="param">-rpf / --root-pass-file</span> root 密码文件（回退）</label>
+              <input type="text" id="f-rp" placeholder="例如: /root/.mongodb-ssh-password" oninput="updateCmd()">
+            </div>
+            <div class="form-group">
+              <label><span class="param">-ss / --ssh-port</span> SSH 端口</label>
               <input type="text" id="f-ss" placeholder="默认: 22" oninput="updateCmd()">
             </div>
             <div class="form-group">
-              <label><span class="param">--repl-set</span> 副本集名称</label>
+              <label><span class="param">-rs / --repl-set</span> 副本集名称</label>
               <input type="text" id="f-replset" placeholder="默认: rs0" oninput="updateCmd()">
             </div>
             <div class="form-group">
-              <label><span class="param">--oplog-size</span> Oplog 大小 (MB)</label>
-              <input type="number" id="f-oplog" placeholder="默认: 自动计算" min="100" oninput="updateCmd()">
+              <label><span class="param">-op / --oplog-size</span> Oplog 大小 (MB)</label>
+              <input type="number" id="f-oplog" placeholder="默认: 自动计算；最小 990" min="990" oninput="updateCmd()">
+            </div>
+            <div class="form-group">
+              <label><span class="param">-j / --remote-parallelism</span> 远程并行数</label>
+              <input type="number" id="f-remote-parallelism" placeholder="默认: 4" min="1" max="32" oninput="updateCmd()">
             </div>
           </div>
         </div>
@@ -243,11 +298,27 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;point
         <div class="form-section-title"><span class="icon">⚙</span> 系统选项</div>
         <div class="form-grid">
           <div class="form-group">
-            <label><span class="param">--os-only</span> 仅配置操作系统</label>
+            <label><span class="param">-oo / --os-only</span> 仅配置操作系统</label>
             <select id="f-osonly" onchange="updateCmd()"><option value="">否</option><option value="Y">是</option></select>
           </div>
           <div class="form-group">
-            <label><span class="param">--debug</span> 调试模式</label>
+            <label><span class="param">-mv / --mongo-version</span> MongoDB 目标版本</label>
+            <input type="text" id="f-mongo-version" placeholder="OS-only 示例: 8.0" oninput="updateCmd()">
+          </div>
+          <div class="form-group">
+            <label><span class="param">-mp / --mongo-package</span> MongoDB Server 包</label>
+            <input type="text" id="f-mongo-package" placeholder="多包时指定，例如: 8.0.29" oninput="updateCmd()">
+          </div>
+          <div class="form-group">
+            <label><span class="param">-oir / --os-iso-root</span> 已挂载 OS ISO</label>
+            <input type="text" id="f-os-iso-root" placeholder="例如: /mnt/rhel9" oninput="updateCmd()">
+          </div>
+          <div class="form-group">
+            <label><span class="param">-opd / --os-packages-dir</span> 已解压 OS 依赖目录</label>
+            <input type="text" id="f-os-packages-dir" placeholder="默认自动读取 mongdb-offline-rpm.tar.gz" oninput="updateCmd()">
+          </div>
+          <div class="form-group">
+            <label><span class="param">-dbg / --debug</span> 调试模式</label>
             <select id="f-debug" onchange="updateCmd()"><option value="">否</option><option value="Y">是</option></select>
           </div>
         </div>
@@ -264,7 +335,7 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;point
         <div class="terminal-content" id="cmdOutput"></div>
         <div class="terminal-actions">
           <button class="terminal-btn reset" onclick="resetForm()">重置参数</button>
-          <button class="terminal-btn copy" onclick="copyCmd()">复制命令</button>
+          <button class="terminal-btn copy" id="copyButton" onclick="copyCmd()">复制命令</button>
         </div>
       </div>
     </div>
@@ -291,10 +362,7 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;point
 <div class="toast" id="toast">已复制到剪贴板</div>
 <script>
 let currentMode = 'single';
-const modeLabels = {
-  'single': '单机模式 (Standalone)',
-  'replicaset': '副本集模式 (Replica Set)'
-};
+let currentCommandText = '';
 
 function isRS() { return currentMode === 'replicaset'; }
 
@@ -304,145 +372,200 @@ function selectMode(mode) {
     el.classList.toggle('active', el.dataset.mode === mode);
   });
   document.getElementById('clusterParams').classList.toggle('show', isRS());
-  // Auto-enable auth for replica set
-  if (isRS()) {
-    document.getElementById('f-auth').value = 'Y';
-    document.getElementById('adminUserGroup').classList.add('show');
-    document.getElementById('adminPassGroup').classList.add('show');
-  }
   updateCmd();
 }
 
 function getVal(id) { return document.getElementById(id)?.value?.trim() || ''; }
 
+function shellQuote(value) {
+  return "'" + value.replace(/'/g, "'\"'\"'") + "'";
+}
+
+function appendStyledText(parent, className, value) {
+  const span = document.createElement('span');
+  span.className = className;
+  span.textContent = value;
+  parent.appendChild(span);
+}
+
+function renderCommand(lines, missing, warnings) {
+  const output = document.getElementById('cmdOutput');
+  const fragment = document.createDocumentFragment();
+  output.replaceChildren();
+  currentCommandText = lines.map((line, index) => {
+    if (index === 0) return line.command;
+    const value = line.value ? ' ' + shellQuote(line.value) : '';
+    const continuation = index < lines.length - 1 ? ' \\' : '';
+    return '  ' + line.flag + value + continuation;
+  }).join('\n');
+  document.getElementById('copyButton').disabled = missing.length > 0;
+
+  lines.forEach((line, index) => {
+    if (index === 0) {
+      appendStyledText(fragment, 'prompt', '$ ');
+      appendStyledText(fragment, 'cmd', line.command);
+    } else {
+      fragment.appendChild(document.createTextNode('  '));
+      appendStyledText(fragment, 'param', line.flag + (line.value ? ' ' : ''));
+      if (line.value) appendStyledText(fragment, 'value', shellQuote(line.value));
+      if (index < lines.length - 1) fragment.appendChild(document.createTextNode(' \\'));
+    }
+    fragment.appendChild(document.createTextNode('\n'));
+  });
+
+  if (missing.length) {
+    fragment.appendChild(document.createTextNode('\n'));
+    appendStyledText(fragment, 'warn', '# ⚠ 请填写必填参数: ' + missing.join(', '));
+  }
+  warnings.forEach(warning => {
+    fragment.appendChild(document.createTextNode('\n'));
+    appendStyledText(fragment, 'warn', '# ⚠ ' + warning);
+  });
+  output.appendChild(fragment);
+}
+
 function updateCmd() {
-  const lines = [];
+  const lines = [{ command: 'bash MongoDB.sh \\' }];
   const missing = [];
-
-  // Auth visibility
-  const authEnabled = getVal('f-auth') === 'Y';
-  document.getElementById('adminUserGroup').classList.toggle('show', authEnabled);
-  document.getElementById('adminPassGroup').classList.toggle('show', authEnabled);
-
-  lines.push({ text: 'bash MongoDB.sh \\', type: 'cmd' });
-
-  // Mode
-  if (isRS()) {
-    lines.push({ text: '-m replicaset', comment: '副本集模式' });
-  } else {
-    lines.push({ text: '-m single', comment: '单机模式' });
-  }
-
-  // Basic params
-  const basicParams = [
-    { id: 'f-n', flag: '-n', label: '主机名前缀' },
-    { id: 'f-d', flag: '-d', label: '安装根目录' },
-    { id: 'f-p', flag: '-p', label: 'MongoDB 端口' },
-    { id: 'f-ou', flag: '-ou', label: '系统用户名' },
-  ];
-  basicParams.forEach(p => {
-    const v = getVal(p.id);
-    if (v) lines.push({ text: `${p.flag} ${v}`, comment: p.label });
-  });
-
-  // Auth
-  if (authEnabled) {
-    lines.push({ text: '--auth', comment: '启用认证' });
-    const adminUser = getVal('f-admin-user');
-    if (adminUser) lines.push({ text: `--admin-user ${adminUser}`, comment: '管理员用户名' });
-    const adminPass = getVal('f-admin-pass');
-    if (adminPass) lines.push({ text: `--admin-pass '${adminPass}'`, comment: '管理员密码' });
-    else missing.push('--admin-pass 管理员密码');
-  }
-
-  // MongoDB config
-  const mongoParams = [
-    { id: 'f-maxconn', flag: '--max-connections', label: '最大连接数' },
-    { id: 'f-backup', flag: '--backup-days', label: '备份保留(天)' },
-  ];
-  mongoParams.forEach(p => {
-    const v = getVal(p.id);
-    if (v) lines.push({ text: `${p.flag} ${v}`, comment: p.label });
-  });
-
-  // System options
-  const osOnly = getVal('f-osonly');
-  if (osOnly === 'Y') lines.push({ text: '--os-only', comment: '仅配置操作系统' });
-  const debug = getVal('f-debug');
-  if (debug === 'Y') lines.push({ text: '--debug', comment: '调试模式' });
-
-  // Cluster params
-  if (isRS()) {
-    const ri = getVal('f-ri');
-    if (ri) lines.push({ text: `-ri ${ri}`, comment: '副本集节点 IP' });
-    else missing.push('-ri 副本集节点 IP');
-
-    const rp = getVal('f-rp');
-    if (rp) lines.push({ text: `-rp '${rp}'`, comment: '远程 root 密码' });
-    else missing.push('-rp 远程 root 密码');
-
-    const ss = getVal('f-ss');
-    if (ss) lines.push({ text: `-ss ${ss}`, comment: 'SSH 端口' });
-
-    const replSet = getVal('f-replset');
-    if (replSet) lines.push({ text: `--repl-set ${replSet}`, comment: '副本集名称' });
-
-    const oplog = getVal('f-oplog');
-    if (oplog) lines.push({ text: `--oplog-size ${oplog}`, comment: 'Oplog 大小(MB)' });
-  }
-
-  // Build output HTML
-  let html = '';
-  if (lines.length <= 2 && currentMode === 'single') {
-    html += `<span class="prompt">$ </span><span class="cmd">bash MongoDB.sh -m single</span>`;
-    html += ` <span class="comment"># ${modeLabels[currentMode]}</span>\n`;
-  }
-  if (!html) {
-    lines.forEach((line, i) => {
-      if (i === 0) {
-        html += `<span class="prompt">$ </span><span class="cmd">${line.text}</span>`;
-        html += ` <span class="comment"># ${modeLabels[currentMode]}</span>\n`;
-      } else {
-        const cont = i < lines.length - 1 ? ' \\' : '';
-        const parts = line.text.split(' ');
-        const flag = parts[0];
-        const val = parts.slice(1).join(' ');
-        if (val) {
-          html += `  <span class="param">${flag} </span><span class="value">${val}</span>${cont}`;
-        } else {
-          html += `  <span class="param">${flag}</span>${cont}`;
-        }
-        if (line.comment) html += ` <span class="comment"># ${line.comment}</span>`;
-        html += '\n';
-      }
-    });
-  }
-
-  // Validation warnings
   const warnings = [];
-  if (isRS()) {
-    const ri = getVal('f-ri');
-    if (ri) {
-      const nodeCount = ri.split(',').filter(s => s.trim()).length;
-      if (nodeCount < 3) {
-        warnings.push('副本集建议至少 3 个节点 (当前: ' + nodeCount + ')');
-      } else if (nodeCount % 2 === 0) {
-        warnings.push('节点数为偶数，建议使用奇数个节点以避免选举分裂 (当前: ' + nodeCount + ')');
-      }
-    }
-    if (!authEnabled) {
-      warnings.push('副本集模式建议启用 --auth 认证');
-    }
-  }
+  const authEnabled = getVal('f-auth') === 'Y';
+  const tlsEnabled = getVal('f-tls') === 'Y';
+  const osOnly = getVal('f-osonly') === 'Y';
 
-  if (missing.length > 0) {
-    html += `\n<span class="warn"># ⚠ 请填写必填参数: ${missing.join(', ')}</span>`;
-  }
-  warnings.forEach(w => {
-    html += `\n<span class="warn"># ⚠ ${w}</span>`;
+  document.getElementById('clusterParams').classList.toggle('show', isRS() && !osOnly);
+  document.getElementById('adminUserGroup').classList.toggle('show', authEnabled && !osOnly);
+  document.getElementById('adminPassGroup').classList.toggle('show', authEnabled && !osOnly);
+  document.getElementById('tlsCaGroup').classList.toggle('show', tlsEnabled && !osOnly);
+  document.getElementById('tlsSingleCertGroup').classList.toggle('show', tlsEnabled && !osOnly && !isRS());
+  document.getElementById('tlsClusterCertGroup').classList.toggle('show', tlsEnabled && !osOnly && isRS());
+  document.getElementById('clusterAuthGroup').classList.toggle('show', tlsEnabled && authEnabled && !osOnly && isRS());
+  lines.push({ flag: '-m', value: isRS() ? 'replicaset' : 'single', comment: isRS() ? '副本集模式' : '单机模式' });
+
+  [
+    { id: 'f-n', flag: '-n', label: '主机名或副本集前缀' },
+    { id: 'f-d', flag: '-d', label: '安装根目录' },
+    { id: 'f-data-dir', flag: '-dd', label: '数据根目录' },
+    { id: 'f-backup-dir', flag: '-bd', label: '备份归档目录' },
+    { id: 'f-p', flag: '-p', label: 'MongoDB 端口' },
+    { id: 'f-ou', flag: '-ou', label: '运行用户及同名主组' },
+    { id: 'f-bind', flag: '-bi', label: '监听地址' },
+    { id: 'f-source', flag: '-as', label: '兼容来源参数' },
+  ].forEach(param => {
+    const value = getVal(param.id);
+    if (value) lines.push({ flag: param.flag, value, comment: param.label });
   });
 
-  document.getElementById('cmdOutput').innerHTML = html;
+  if (!osOnly && authEnabled) {
+    lines.push({ flag: '-a', value: '', comment: '启用 SCRAM-SHA-256 认证' });
+    const adminUser = getVal('f-admin-user');
+    if (adminUser) lines.push({ flag: '-au', value: adminUser, comment: '管理员用户名' });
+    const adminPass = getVal('f-admin-pass');
+    if (adminPass.length >= 12) {
+      lines.push({ flag: '-ap', value: adminPass, comment: '管理员密码' });
+      warnings.push('直接密码会进入 shell 历史和进程参数；详细安装日志会脱敏，生产环境建议改用 --admin-pass-file');
+    } else if (adminPass) {
+      missing.push('管理员密码至少 12 个字符');
+    } else {
+      missing.push('--admin-pass 管理员密码');
+    }
+  } else if (!osOnly) {
+    lines.push({ flag: '-na', value: '', comment: '关闭认证（默认）' });
+  }
+
+  if (!osOnly && tlsEnabled) {
+    lines.push({ flag: '-t', value: '', comment: '强制所有连接使用 TLS' });
+    const tlsCa = getVal('f-tls-ca');
+    if (tlsCa) lines.push({ flag: '-tca', value: tlsCa, comment: 'CA 证书' });
+    else missing.push('--tls-ca-file CA 证书');
+
+    if (isRS()) {
+      const tlsCertDir = getVal('f-tls-cert-dir');
+      if (tlsCertDir) lines.push({ flag: '-tcd', value: tlsCertDir, comment: '成员证书目录' });
+      else missing.push('--tls-cert-dir 成员证书目录');
+      if (authEnabled) {
+        const clusterAuthMode = getVal('f-cluster-auth') || 'keyFile';
+        lines.push({ flag: '-cam', value: clusterAuthMode, comment: '节点内部认证' });
+      }
+    } else {
+      const tlsCert = getVal('f-tls-cert');
+      if (tlsCert) lines.push({ flag: '-tck', value: tlsCert, comment: '服务端证书和私钥' });
+      else missing.push('--tls-cert-key-file 服务端证书和私钥');
+    }
+  } else if (!osOnly) {
+    lines.push({ flag: '-nt', value: '', comment: '关闭 TLS（默认）' });
+  }
+
+  [
+    { id: 'f-maxconn', flag: '-mc', label: '最大连接数' },
+    { id: 'f-backup', flag: '-br', label: '备份保留(天)' },
+  ].forEach(param => {
+    const value = getVal(param.id);
+    if (value) lines.push({ flag: param.flag, value, comment: param.label });
+  });
+
+  if (osOnly) lines.push({ flag: '-oo', value: '', comment: '仅配置操作系统' });
+  const targetVersion = getVal('f-mongo-version');
+  if (targetVersion) lines.push({ flag: '-mv', value: targetVersion, comment: 'MongoDB 目标版本' });
+  else if (osOnly) warnings.push('OS-only 未指定 --mongo-version 时将保持当前 THP 设置');
+  const mongoPackage = getVal('f-mongo-package');
+  if (mongoPackage) lines.push({ flag: '-mp', value: mongoPackage, comment: 'MongoDB Server 安装包/版本' });
+  const osIsoRoot = getVal('f-os-iso-root');
+  if (osIsoRoot) lines.push({ flag: '-oir', value: osIsoRoot, comment: '已挂载 OS ISO 根目录' });
+  const osPackagesDir = getVal('f-os-packages-dir');
+  if (osPackagesDir) lines.push({ flag: '-opd', value: osPackagesDir, comment: '已解压 OS 离线依赖目录' });
+  if (getVal('f-debug') === 'Y') lines.push({ flag: '-dbg', value: '', comment: '调试模式' });
+
+  if (isRS() && !osOnly) {
+    const hosts = getVal('f-hosts');
+    if (hosts) {
+      lines.push({ flag: '-H', value: hosts, comment: '副本集 DNS 主机名' });
+      const members = hosts.split(',').map(s => s.trim()).filter(Boolean);
+      if (members.length < 3) warnings.push('副本集建议至少 3 个节点 (当前: ' + members.length + ')');
+      else if (members.length % 2 === 0) warnings.push('节点数为偶数，建议使用奇数个节点 (当前: ' + members.length + ')');
+      if (members.some(member => /^\d{1,3}(\.\d{1,3}){3}$/.test(member))) {
+        warnings.push('MongoDB 5.0+ 副本集成员必须使用 DNS 主机名，不能只填 IP');
+      }
+    } else {
+      missing.push('--hosts 副本集 DNS 主机名');
+    }
+
+    const remoteIps = getVal('f-remote-ips');
+    if (remoteIps) {
+      lines.push({ flag: '-ri', value: remoteIps, comment: '逐节点 SSH 端点' });
+      const memberCount = hosts.split(',').map(s => s.trim()).filter(Boolean).length;
+      const endpointCount = remoteIps.split(',').map(s => s.trim()).filter(Boolean).length;
+      if (hosts && memberCount !== endpointCount) missing.push('--hosts 与 --remote-ips 数量必须一致');
+    } else {
+      missing.push('--remote-ips SSH 端点');
+    }
+
+    const sshKey = getVal('f-ssh-key');
+    const rootPassFile = getVal('f-rp');
+    if (sshKey) lines.push({ flag: '-sk', value: sshKey, comment: 'root SSH 私钥' });
+    if (rootPassFile) lines.push({ flag: '-rpf', value: rootPassFile, comment: 'root 密码文件' });
+    if (!sshKey && !rootPassFile) warnings.push('未指定 SSH 凭据，将尝试默认密钥或 ssh-agent');
+
+    const sshPort = getVal('f-ss');
+    if (sshPort) lines.push({ flag: '-ss', value: sshPort, comment: 'SSH 端口' });
+    const replSet = getVal('f-replset');
+    if (replSet) lines.push({ flag: '-rs', value: replSet, comment: '副本集名称' });
+    const oplog = getVal('f-oplog');
+    if (oplog) lines.push({ flag: '-op', value: oplog, comment: 'Oplog 大小(MB)' });
+    const remoteParallelism = getVal('f-remote-parallelism');
+    if (remoteParallelism) lines.push({ flag: '-j', value: remoteParallelism, comment: '远程节点并行数' });
+  }
+
+  const bind = getVal('f-bind');
+  const source = getVal('f-source');
+  const bindAddresses = (bind || '0.0.0.0').split(',').map(address => address.trim()).filter(Boolean);
+  const exposesNetwork = bindAddresses.some(address => address !== 'localhost' && !address.startsWith('127.'));
+  if (!authEnabled && exposesNetwork) {
+    warnings.push('高风险：未启用认证且监听非本机地址，任何网络可达主机都可能读写数据');
+  }
+  if (source) warnings.push('--allow-source 不会生效，因为安装过程会关闭防火墙');
+  warnings.push('安装过程会停止并禁用防火墙，同时关闭 SELinux');
+
+  renderCommand(lines, missing, warnings);
 }
 
 function resetForm() {
@@ -454,14 +577,7 @@ function resetForm() {
 }
 
 function copyCmd() {
-  const el = document.getElementById('cmdOutput');
-  const text = el.innerText
-    .replace(/^[\$]\s*/, '')
-    .replace(/# ⚠.*$/gm, '')
-    .replace(/\s*#[^\n]*/g, '')
-    .replace(/\n\s*\n/g, '\n')
-    .trim();
-  navigator.clipboard.writeText(text).then(() => {
+  navigator.clipboard.writeText(currentCommandText).then(() => {
     const toast = document.getElementById('toast');
     toast.classList.add('show');
     setTimeout(() => toast.classList.remove('show'), 2000);

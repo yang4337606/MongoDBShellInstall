@@ -1,0 +1,2 @@
+# Real-machine validation evidence can contain private lab topology and paths.
+tests/results/
