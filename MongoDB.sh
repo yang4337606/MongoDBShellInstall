@@ -4,7 +4,7 @@
 # 创建时间   :   2026-04-24 00:00:00
 # 描述      :   MongoDB 一键安装脚本（单机/副本集 双模式）
 # 路径      :   /soft/MongoDBShellInstall
-# 版本      :   2.0.0
+# 版本      :   2.0.1
 # 借鉴      :   KafkaShellInstall
 # 兼容      :   RHEL/CentOS/Rocky/Alma 7-9, Debian 10-13, Ubuntu 18.04-24.04,
 #               openSUSE/SLES 12-15, Arch Linux, Fedora, Amazon Linux 2/2023
@@ -68,7 +68,7 @@ trap 'handle_signal TERM 143' TERM
 #==============================================================#
 #                         全局变量定义                         #
 #==============================================================#
-MONGO_INSTALL_VERSION="2.0.0"
+MONGO_INSTALL_VERSION="2.0.1"
 
 software_dir=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 script_name=$(basename "${BASH_SOURCE[0]}")
@@ -1445,11 +1445,6 @@ function check_packages() {
 #==============================================================#
 #                   安装依赖包                                 #
 #==============================================================#
-function manifest_value() {
-  local key="$1" manifest="$2"
-  awk -F= -v wanted="$key" '$1 == wanted {sub(/^[^=]*=/, ""); print; exit}' "$manifest"
-}
-
 function prepare_os_packages_root() {
   local extract_dir entry archive_list
   [[ -d "$os_packages_root" ]] && return 0
@@ -1501,44 +1496,42 @@ function resolve_os_packages_dir() {
 }
 
 function validate_os_package_bundle() {
-  local bundle_dir="$1" manifest
-  local bundle_os bundle_major bundle_arch checksum checksum_file checksum_count=0
-  manifest="${bundle_dir}/manifest.env"
-  [[ -f "$manifest" && ! -L "$manifest" ]] || {
-    echo "错误: OS 离线包缺少 manifest.env: ${bundle_dir}" >&2
-    return 1
-  }
-  bundle_os=$(manifest_value os_id "$manifest")
-  bundle_major=$(manifest_value os_major "$manifest")
-  bundle_arch=$(manifest_value arch "$manifest")
+  local bundle_dir="$1" bundle_arch bundle_major bundle_os package_file package_arch
+  local bundle_entry_count=0
+  bundle_dir=$(readlink -f -- "$bundle_dir") || return 1
+  bundle_arch=$(basename -- "$bundle_dir")
+  bundle_major=$(basename -- "$(dirname -- "$bundle_dir")")
+  bundle_os=$(basename -- "$(dirname -- "$(dirname -- "$bundle_dir")")")
   if [[ "$bundle_os" != "$os_distro" || "$bundle_major" != "$os_version" || "$bundle_arch" != "$os_arch" ]]; then
-    printf '错误: OS 离线包平台不匹配: bundle=%s/%s/%s, host=%s/%s/%s\n' \
+    printf '错误: OS 离线包目录平台不匹配: bundle=%s/%s/%s, host=%s/%s/%s\n' \
       "$bundle_os" "$bundle_major" "$bundle_arch" "$os_distro" "$os_version" "$os_arch" >&2
     return 1
   fi
-  if [[ -f "${bundle_dir}/SHA256SUMS" ]]; then
-    while read -r checksum checksum_file; do
-      checksum_file="${checksum_file#\*}"
-      [[ "$checksum" =~ ^[[:xdigit:]]{64}$ \
-        && "$checksum_file" =~ ^[A-Za-z0-9_.+~-]+\.rpm$ ]] || {
-        echo "错误: OS 离线包 SHA256SUMS 包含不安全或无效的记录" >&2
-        return 1
-      }
-      ((checksum_count++))
-    done < "${bundle_dir}/SHA256SUMS"
-    (( checksum_count > 0 )) || {
-      echo "错误: OS 离线包 SHA256SUMS 为空" >&2
+  while IFS= read -r -d '' package_file; do
+    ((bundle_entry_count++))
+    [[ -f "$package_file" && ! -L "$package_file" \
+      && "$(basename -- "$package_file")" =~ ^[A-Za-z0-9_.+~-]+\.rpm$ ]] || {
+      printf '错误: OS 离线补充包只能包含 RPM 文件: %s\n' "$package_file" >&2
       return 1
     }
-    (cd "$bundle_dir" && sha256sum -c SHA256SUMS) || {
-      echo "错误: OS 离线包 SHA256 校验失败: ${bundle_dir}" >&2
+    package_arch=$(rpm -qp --qf '%{ARCH}' "$package_file" 2>/dev/null) || {
+      printf '错误: 无法读取 OS 离线 RPM: %s\n' "$package_file" >&2
       return 1
     }
-  fi
+    [[ "$package_arch" == "$os_arch" || "$package_arch" == "noarch" ]] || {
+      printf '错误: OS 离线 RPM 架构不匹配: %s (%s != %s)\n' \
+        "$package_file" "$package_arch" "$os_arch" >&2
+      return 1
+    }
+  done < <(find "$bundle_dir" -mindepth 1 -maxdepth 1 -print0)
+  (( bundle_entry_count > 0 )) || {
+    echo "错误: OS 离线包目录为空: ${bundle_dir}" >&2
+    return 1
+  }
 }
 
 function install_os_offline_bundle() {
-  local bundle_dir
+  local bundle_dir package_file
   local -a package_files=()
   bundle_dir=$(resolve_os_packages_dir) || return $?
   validate_os_package_bundle "$bundle_dir" || return 1
@@ -1560,6 +1553,13 @@ function install_os_offline_bundle() {
   echo "使用 OS 离线补充包: ${bundle_dir} (${#package_files[@]} 个)"
   case "$os_distro_family" in
     rhel)
+      import_system_rpm_signing_key || return 1
+      for package_file in "${package_files[@]}"; do
+        rpm --checksig "$package_file" >/dev/null 2>&1 || {
+          printf '错误: OS 离线补充包 RPM 签名校验失败: %s\n' "$package_file" >&2
+          return 1
+        }
+      done
       if command -v dnf >/dev/null 2>&1; then
         dnf --disablerepo='*' install -y -q "${package_files[@]}"
       elif command -v yum >/dev/null 2>&1; then
@@ -1616,7 +1616,7 @@ function import_system_rpm_signing_key() {
 function install_os_iso_packages() {
   local -a packages=("$@") repo_args=()
   local -a iso_missing=()
-  local iso_root="${os_iso_root:-}" package_name
+  local iso_root="${os_iso_root:-}" package_name yum_repo_dir iso_package_names repo_id
   (( ${#packages[@]} > 0 )) || return 0
   [[ -n "$iso_root" ]] || return 3
   [[ -d "$iso_root" ]] || {
@@ -1626,12 +1626,14 @@ function install_os_iso_packages() {
   iso_root=$(readlink -f -- "$iso_root") || return 1
   case "$os_distro_family" in
     rhel)
-      command -v dnf >/dev/null 2>&1 || return 3
       if [[ -f "${iso_root}/BaseOS/repodata/repomd.xml" ]]; then
         repo_args+=(--repofrompath "mongodb-os-baseos,file://${iso_root}/BaseOS")
       fi
       if [[ -f "${iso_root}/AppStream/repodata/repomd.xml" ]]; then
         repo_args+=(--repofrompath "mongodb-os-appstream,file://${iso_root}/AppStream")
+      fi
+      if [[ -f "${iso_root}/repodata/repomd.xml" ]]; then
+        repo_args+=(--repofrompath "mongodb-os-root,file://${iso_root}")
       fi
       (( ${#repo_args[@]} > 0 )) || {
         echo "错误: 指定目录不是有效的 RHEL ${os_version} ISO 根目录: ${iso_root}" >&2
@@ -1641,17 +1643,65 @@ function install_os_iso_packages() {
       echo "使用已挂载 OS ISO 安装依赖: ${iso_root}"
       # 逐包安装：ISO 中不存在的包不会阻止其他基础依赖安装，缺失项随后由
       # mongdb-offline-rpm.tar.gz 补充。
-      for package_name in "${packages[@]}"; do
-        if ! dnf -q --disablerepo='*' "${repo_args[@]}" repoquery --available \
-          --qf '%{name}' "$package_name" 2>/dev/null | grep -Fxq "$package_name"; then
-          iso_missing+=("$package_name")
-          continue
-        fi
-        dnf --disablerepo='*' "${repo_args[@]}" install -y -q "$package_name" || {
-          printf '错误: 从 OS ISO 安装已存在的软件包失败（保留 GPG 校验）: %s\n' "$package_name" >&2
+      if command -v dnf >/dev/null 2>&1; then
+        for package_name in "${packages[@]}"; do
+          if ! dnf -q --disablerepo='*' "${repo_args[@]}" repoquery --available \
+            --qf '%{name}' "$package_name" 2>/dev/null | grep -Fxq "$package_name"; then
+            iso_missing+=("$package_name")
+            continue
+          fi
+          dnf --disablerepo='*' "${repo_args[@]}" install -y -q "$package_name" || {
+            printf '错误: 从 OS ISO 安装已存在的软件包失败（保留 GPG 校验）: %s\n' "$package_name" >&2
+            return 1
+          }
+        done
+      elif command -v yum >/dev/null 2>&1; then
+        # CentOS/RHEL 7 没有 dnf。使用临时、只读 ISO 仓库配置，并从 RPM
+        # 元数据生成一次包名索引，避免把已安装但 ISO 仍提供的包误判为缺失。
+        yum_repo_dir=$(mktemp -d /tmp/mongo-os-iso-repo.XXXXXX) || return 1
+        MONGO_INSTALL_TMPDIRS+=("$yum_repo_dir")
+        iso_package_names="${yum_repo_dir}/package-names"
+        find "$iso_root" -type f -name '*.rpm' -print0 \
+          | xargs -0 -r rpm -qp --qf '%{NAME}\n' 2>/dev/null \
+          | sort -u > "$iso_package_names" || return 1
+        [[ -s "$iso_package_names" ]] || {
+          echo "错误: OS ISO 中没有可读取的 RPM 软件包: ${iso_root}" >&2
           return 1
         }
-      done
+        if [[ -f "${iso_root}/repodata/repomd.xml" ]]; then
+          cat > "${yum_repo_dir}/mongodb-os-root.repo" <<EOF
+[mongodb-os-root]
+name=MongoDB installer OS ISO
+baseurl=file://${iso_root}
+enabled=1
+gpgcheck=1
+EOF
+        else
+          for repo_id in BaseOS AppStream; do
+            [[ -f "${iso_root}/${repo_id}/repodata/repomd.xml" ]] || continue
+            cat > "${yum_repo_dir}/mongodb-os-${repo_id}.repo" <<EOF
+[mongodb-os-${repo_id}]
+name=MongoDB installer OS ISO ${repo_id}
+baseurl=file://${iso_root}/${repo_id}
+enabled=1
+gpgcheck=1
+EOF
+          done
+        fi
+        for package_name in "${packages[@]}"; do
+          if ! grep -Fxq "$package_name" "$iso_package_names"; then
+            iso_missing+=("$package_name")
+            continue
+          fi
+          yum --disablerepo='*' --setopt="reposdir=${yum_repo_dir}" \
+            --enablerepo='mongodb-os-*' install -y -q "$package_name" || {
+            printf '错误: 从 OS ISO 安装已存在的软件包失败（保留 GPG 校验）: %s\n' "$package_name" >&2
+            return 1
+          }
+        done
+      else
+        return 3
+      fi
       if (( ${#iso_missing[@]} > 0 )); then
         printf 'OS ISO 未提供，转由离线补充包处理: %s\n' "${iso_missing[*]}"
         return 3

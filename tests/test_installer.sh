@@ -6,6 +6,7 @@ installer="${repo_dir}/MongoDB.sh"
 generator="${repo_dir}/generator.html"
 docs="${repo_dir}/docs.html"
 builder="${repo_dir}/tools/build_offline_rpm_bundle.sh"
+offline_bundle="${repo_dir}/mongdb-offline-rpm.tar.gz"
 
 passes=0
 failures=0
@@ -333,48 +334,40 @@ else
 fi
 
 if declare -F validate_os_package_bundle >/dev/null; then
-  bundle_tmp=$(mktemp -d)
+  archive_fixture=$(mktemp -d)
   original_os_distro="$os_distro"
   original_os_version="$os_version"
   original_os_arch="$os_arch"
-  os_distro=rhel
-  os_version=9
+  tar -xzf "$offline_bundle" -C "$archive_fixture"
+  fixture_dir="${archive_fixture}/mongdb-offline-rpm/centos/7/x86_64"
+  os_distro=centos
+  os_version=7
   os_arch=x86_64
-  printf 'format=1\nos_id=rhel\nos_major=9\narch=x86_64\n' > "${bundle_tmp}/manifest.env"
-  assert_success "accept matching OS-major and architecture bundle" validate_os_package_bundle "$bundle_tmp"
-  printf '%064d  ../../etc/passwd\n' 0 > "${bundle_tmp}/SHA256SUMS"
-  assert_failure "reject checksum paths outside an offline bundle" validate_os_package_bundle "$bundle_tmp"
-  rm -f "${bundle_tmp}/SHA256SUMS"
+  assert_success "accept RPM-only bundle for matching OS-major and architecture" validate_os_package_bundle "$fixture_dir"
+  : > "${fixture_dir}/unexpected.txt"
+  assert_failure "reject non-RPM files inside an offline bundle" validate_os_package_bundle "$fixture_dir"
+  rm -f "${fixture_dir}/unexpected.txt"
   os_version=8
-  assert_failure "reject an offline bundle for another OS major" validate_os_package_bundle "$bundle_tmp"
-  printf 'format=1\nos_id=rocky\nos_major=8\narch=x86_64\n' > "${bundle_tmp}/manifest.env"
+  assert_failure "reject an offline bundle for another OS major" validate_os_package_bundle "$fixture_dir"
   os_distro=rocky
-  assert_success "accept exact Rocky 8 offline bundle" validate_os_package_bundle "$bundle_tmp"
-  printf 'format=1\nos_id=rhel\nos_major=8\narch=x86_64\n' > "${bundle_tmp}/manifest.env"
-  assert_failure "reject RHEL bundle on Rocky despite shared family" validate_os_package_bundle "$bundle_tmp"
+  os_version=7
+  assert_failure "reject CentOS bundle on Rocky despite shared family" validate_os_package_bundle "$fixture_dir"
 
-  archive_fixture=$(mktemp -d)
-  fixture_dir="${archive_fixture}/source/mongdb-offline-rpm/rhel/9/x86_64"
-  mkdir -p "$fixture_dir"
-  printf 'format=1\nos_id=rhel\nos_major=9\narch=x86_64\n' > "${fixture_dir}/manifest.env"
-  : > "${fixture_dir}/fixture-1.0-1.x86_64.rpm"
-  (cd "$fixture_dir" && sha256sum fixture-1.0-1.x86_64.rpm > SHA256SUMS)
-  tar -C "${archive_fixture}/source" -czf "${archive_fixture}/mongdb-offline-rpm.tar.gz" mongdb-offline-rpm
   original_os_packages_archive="$os_packages_archive"
   original_os_packages_root="$os_packages_root"
   original_os_packages_dir="$os_packages_dir"
-  os_distro=rhel
-  os_version=9
+  os_distro=centos
+  os_version=7
   os_arch=x86_64
-  os_packages_archive="${archive_fixture}/mongdb-offline-rpm.tar.gz"
+  os_packages_archive="$offline_bundle"
   os_packages_root="${archive_fixture}/not-extracted"
   os_packages_dir=''
   if prepare_os_packages_root \
     && [[ "$os_packages_root" == */mongdb-offline-rpm ]] \
-    && validate_os_package_bundle "${os_packages_root}/rhel/9/x86_64"; then
-    pass "extract requested archive and resolve rhel/9/x86_64 layout"
+    && validate_os_package_bundle "${os_packages_root}/centos/7/x86_64"; then
+    pass "extract requested archive and resolve centos/7/x86_64 layout"
   else
-    fail "extract requested archive and resolve rhel/9/x86_64 layout"
+    fail "extract requested archive and resolve centos/7/x86_64 layout"
   fi
   os_packages_archive="$original_os_packages_archive"
   os_packages_root="$original_os_packages_root"
@@ -382,7 +375,7 @@ if declare -F validate_os_package_bundle >/dev/null; then
   os_distro="$original_os_distro"
   os_version="$original_os_version"
   os_arch="$original_os_arch"
-  rm -rf "$bundle_tmp" "$archive_fixture"
+  rm -rf "$archive_fixture"
 else
   fail "OS offline bundle validator exists"
 fi
@@ -730,6 +723,21 @@ assert_file_contains "generator exposes independent backup directory" "$generato
 assert_file_contains "installer uses requested offline archive name" "$installer" 'mongdb-offline-rpm\.tar\.gz'
 assert_file_contains "documentation uses requested offline archive layout" "$docs" 'mongdb-offline-rpm/rhel/9/x86_64/'
 assert_file_contains "offline bundle builder emits requested top-level directory" "$builder" 'mongdb-offline-rpm/\$\{os_id\}/\$\{os_major\}/\$\{arch\}/'
+assert_file_contains "offline bundle builder includes password-based replica dependency" "$builder" '^[[:space:]]*sshpass$'
+assert_file_contains "CentOS 7 ISO path uses yum when dnf is unavailable" "$installer" 'command -v yum'
+assert_file_contains "offline RPM signatures are verified" "$installer" 'rpm --checksig'
+assert_file_contains "documentation distinguishes actual bundle delivery from maintainer tooling" "$docs" '安装用户不需要运行生成工具'
+assert_success "actual offline bundle is a readable gzip tar archive" tar -tzf "$offline_bundle"
+if tar -tzf "$offline_bundle" 2>/dev/null | grep -Eq '^mongdb-offline-rpm/centos/7/x86_64/sshpass-[^/]+\.rpm$'; then
+  pass "actual offline bundle contains the CentOS 7 ISO gap"
+else
+  fail "actual offline bundle contains the CentOS 7 ISO gap"
+fi
+if tar -tzf "$offline_bundle" 2>/dev/null | grep -Ev '/$|\.rpm$' | grep -q .; then
+  fail "actual offline bundle contains RPM dependencies only"
+else
+  pass "actual offline bundle contains RPM dependencies only"
+fi
 assert_file_not_contains "documentation commands do not comment after line continuations" "$docs" '\\[[:space:]]*<span class="c">'
 assert_success "installer passes Bash syntax validation" bash -n "$installer"
 assert_success "offline bundle builder passes Bash syntax validation" bash -n "$builder"

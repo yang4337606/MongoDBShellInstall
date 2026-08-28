@@ -202,8 +202,6 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:100%;pointe
     8/x86_64/
     9/
       x86_64/
-        manifest.env
-        SHA256SUMS
         *.rpm
   rocky/
     8/x86_64/
@@ -211,7 +209,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:100%;pointe
   centos/
     7/x86_64/</div>
 </div>
-<p>使用同 OS 主版本和架构、且能访问软件仓库的构建机执行 <code>bash tools/build_offline_rpm_bundle.sh</code>，即可生成上述归档。RPM 版本由构建时启用的仓库解析，不在脚本中固定。安装时先尝试 <code>--os-iso-root</code> 指定的已挂载 ISO，再使用补充包，最后才尝试在线仓库。</p>
+<p>GA 发布资产直接提供经实机 ISO 差集验证的 <code>mongdb-offline-rpm.tar.gz</code>；安装用户不需要运行生成工具。归档内部只允许包含 RPM 依赖包，不放清单、校验文件或其他辅助文件，也不增加 SHA256SUMS 校验。当前测试使用的 RHEL 8/9 与 Rocky Linux 8/9 完整 DVD ISO 已包含所需依赖，补充包只包含 CentOS 7 x86_64 DVD ISO 缺失的 <code>sshpass</code>。<code>tools/build_offline_rpm_bundle.sh</code> 仅供维护者在更换 ISO 或增加 OS/架构时重建介质，不能替代实际补充包交付。安装时先尝试 <code>--os-iso-root</code> 指定的已挂载 ISO，再使用补充包，最后才尝试在线仓库。</p>
 <div class="note"><strong>提示：</strong>只有一个 MongoDB Server 包时自动选择；有多个时交互选择。非交互安装存在多个包时必须通过 <code>--mongo-package</code> 指定文件名或版本。脚本会校验 Server 包和 OS 离线包，Server 包文件名不得包含 "database-tools" 或 "mongosh"。</div>
 
 <h2 id="media">安装介质</h2>
@@ -543,6 +541,13 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:100%;pointe
 <p>不可以。脚本为该用户配置 <code>/sbin/nologin</code> 并锁定密码，将其同名组设为主组。MongoDB 通过 systemd 以同一用户和组（例如 <code>User=mongoops</code>、<code>Group=mongoops</code>）运行。</p>
 
 <h2 id="changelog">更新日志</h2>
+
+<h3>v2.0.1 (2026-08)</h3>
+<ul>
+<li>发布实际 <code>mongdb-offline-rpm.tar.gz</code>，归档内只包含实机 CentOS 7 x86_64 DVD ISO 缺失的 <code>sshpass</code> RPM</li>
+<li>CentOS 7 无 dnf 时改用 yum 从挂载 ISO 安装依赖，并将 ISO 缺项转交离线补充包</li>
+<li>OS 离线 RPM 安装前导入系统厂商密钥并执行 RPM 签名校验</li>
+</ul>
 
 <h3>v2.0.0 (2026-08)</h3>
 <ul>

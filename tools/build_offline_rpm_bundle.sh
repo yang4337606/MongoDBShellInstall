@@ -9,6 +9,7 @@ declare -a default_packages=(
   bash coreutils findutils gawk grep sed tar gzip shadow-utils util-linux
   iproute procps-ng systemd openssh-clients openssl cronie logrotate
   numactl net-tools sysstat lsof libcurl xz-libs cyrus-sasl cyrus-sasl-plain
+  sshpass
 )
 
 usage() {
@@ -122,20 +123,6 @@ shopt -s nullglob
 rpm_files=("${bundle_dir}"/*.rpm)
 shopt -u nullglob
 (( ${#rpm_files[@]} > 0 )) || { echo "错误: 仓库未下载到任何 RPM" >&2; exit 1; }
-
-{
-  printf 'format=1\n'
-  printf 'os_id=%s\n' "$os_id"
-  printf 'os_major=%s\n' "$os_major"
-  printf 'arch=%s\n' "$arch"
-  printf 'created_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  printf 'package_count=%d\n' "${#rpm_files[@]}"
-} > "${bundle_dir}/manifest.env"
-
-(
-  cd "$bundle_dir"
-  sha256sum ./*.rpm | sed 's#  \./#  #' > SHA256SUMS
-)
 
 archive_tmp="${output_file}.part.$$"
 tar -C "$work_dir" -czf "$archive_tmp" mongdb-offline-rpm
