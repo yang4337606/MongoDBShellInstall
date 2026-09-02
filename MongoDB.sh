@@ -4,13 +4,21 @@
 # 创建时间   :   2026-04-24 00:00:00
 # 描述      :   MongoDB 一键安装脚本（单机/副本集 双模式）
 # 路径      :   /soft/MongoDBShellInstall
-# 版本      :   2.0.2
+# 版本      :   2.0.3
 # 借鉴      :   KafkaShellInstall
 # 兼容      :   RHEL/CentOS/Rocky/Alma 7-9, Debian 10-13, Ubuntu 18.04-24.04,
 #               openSUSE/SLES 12-15, Arch Linux, Fedora, Amazon Linux 2/2023
 #               (MongoDB 官方支持平台: RHEL 8/9, Debian 11/12, Ubuntu 22.04/24.04,
 #                SLES 15, Amazon Linux 2023)
 #==============================================================#
+case $- in
+  *x*)
+    # 命令行可能包含 --root-pass/--admin-pass；禁止调用方的 xtrace 在参数解析时泄密。
+    set +x
+    printf '警告: 已关闭 shell xtrace，避免敏感参数写入终端或日志\n' >&2
+    ;;
+esac
+
 set -o pipefail
 umask 027
 
@@ -18,29 +26,97 @@ umask 027
 MONGO_INSTALL_TMPFILES=()
 MONGO_INSTALL_TMPDIRS=()
 MONGO_REMOTE_DEPLOY_PIDS=()
+MONGO_REMOTE_DEPLOY_PGIDS=()
+MONGO_ACTIVE_COMMAND_PID=""
+MONGO_ACTIVE_COMMAND_PGID=""
 _ACTIVE_SPINNER_PID=""
 PROGRESS_CURSOR_HIDDEN=0
+PROGRESS_TERMINAL_ACTIVE=0
+PROGRESS_TERMINAL_ROWS=0
+MONGO_CLEANUP_RUNNING=0
 mongo_ssh_control_dir=""
+
+process_group_has_live_members() {
+  local process_group="${1:-}"
+  [[ "$process_group" =~ ^[0-9]+$ ]] || return 1
+  if ! command -v ps >/dev/null 2>&1 || ! command -v awk >/dev/null 2>&1; then
+    kill -0 -- "-${process_group}" 2>/dev/null
+    return
+  fi
+  ps -eo pgid=,stat= 2>/dev/null | awk -v target="$process_group" '
+    $1 == target && $2 !~ /^Z/ { found=1 }
+    END { exit !found }
+  '
+}
+
+terminate_process_group() {
+  local process_group="${1:-}" root_pid="${2:-}" self_group="" attempt
+  [[ "$process_group" =~ ^[0-9]+$ ]] || return 0
+  (( process_group > 1 )) || return 0
+  self_group=$(ps -o pgid= -p "$$" 2>/dev/null | tr -d '[:space:]')
+  [[ -z "$self_group" || "$process_group" != "$self_group" ]] || return 0
+
+  kill -TERM -- "-${process_group}" 2>/dev/null || true
+  for ((attempt=0; attempt<30; attempt++)); do
+    process_group_has_live_members "$process_group" || break
+    sleep 0.1
+  done
+  if process_group_has_live_members "$process_group"; then
+    kill -KILL -- "-${process_group}" 2>/dev/null || true
+  fi
+  [[ "$root_pid" =~ ^[0-9]+$ ]] && wait "$root_pid" 2>/dev/null || true
+}
+
 cleanup_on_exit() {
+  (( MONGO_CLEANUP_RUNNING == 0 )) || return 0
+  MONGO_CLEANUP_RUNNING=1
   if [[ -n "$_ACTIVE_SPINNER_PID" ]]; then
     kill "$_ACTIVE_SPINNER_PID" 2>/dev/null
     wait "$_ACTIVE_SPINNER_PID" 2>/dev/null
     _ACTIVE_SPINNER_PID=""
   fi
+  if (( PROGRESS_TERMINAL_ACTIVE )); then
+    printf '\033[r' 2>/dev/null
+    PROGRESS_TERMINAL_ACTIVE=0
+  fi
   if (( PROGRESS_CURSOR_HIDDEN )); then
     printf '\033[?25h' 2>/dev/null
     PROGRESS_CURSOR_HIDDEN=0
   fi
-  local deploy_pid
+
+  if [[ -n "$MONGO_ACTIVE_COMMAND_PGID" ]]; then
+    terminate_process_group "$MONGO_ACTIVE_COMMAND_PGID" "$MONGO_ACTIVE_COMMAND_PID"
+    MONGO_ACTIVE_COMMAND_PID=""
+    MONGO_ACTIVE_COMMAND_PGID=""
+  elif [[ "$MONGO_ACTIVE_COMMAND_PID" =~ ^[0-9]+$ ]]; then
+    kill "$MONGO_ACTIVE_COMMAND_PID" 2>/dev/null || true
+    wait "$MONGO_ACTIVE_COMMAND_PID" 2>/dev/null || true
+    MONGO_ACTIVE_COMMAND_PID=""
+  fi
+
+  local deploy_pid deploy_pgid index control_socket
   # Bash 4.2 (CentOS 7) treats an empty array expansion as an unbound
   # variable under `set -u`. The + guard keeps cleanup safe when no worker
   # or temporary path was registered.
-  for deploy_pid in ${MONGO_REMOTE_DEPLOY_PIDS[@]+"${MONGO_REMOTE_DEPLOY_PIDS[@]}"}; do
-    if kill -0 "$deploy_pid" 2>/dev/null; then
+  for ((index=0; index<${#MONGO_REMOTE_DEPLOY_PIDS[@]}; index++)); do
+    deploy_pid=${MONGO_REMOTE_DEPLOY_PIDS[$index]}
+    deploy_pgid=${MONGO_REMOTE_DEPLOY_PGIDS[$index]:-}
+    [[ "$deploy_pid" =~ ^[0-9]+$ ]] || continue
+    if [[ -n "$deploy_pgid" ]]; then
+      terminate_process_group "$deploy_pgid" "$deploy_pid"
+    else
       kill "$deploy_pid" 2>/dev/null || true
+      wait "$deploy_pid" 2>/dev/null || true
     fi
-    wait "$deploy_pid" 2>/dev/null || true
   done
+  MONGO_REMOTE_DEPLOY_PIDS=()
+  MONGO_REMOTE_DEPLOY_PGIDS=()
+  if [[ -n "$mongo_ssh_control_dir" && -d "$mongo_ssh_control_dir" && ! -L "$mongo_ssh_control_dir" ]]; then
+    for control_socket in "$mongo_ssh_control_dir"/*; do
+      [[ -S "$control_socket" ]] || continue
+      timeout 2 ssh -S "$control_socket" -O exit localhost </dev/null >/dev/null 2>&1 || true
+    done
+  fi
   for tmpf in ${MONGO_INSTALL_TMPFILES[@]+"${MONGO_INSTALL_TMPFILES[@]}"}; do
     [[ -f "$tmpf" ]] && rm -f "$tmpf"
   done
@@ -65,10 +141,47 @@ trap 'cleanup_on_exit $?' EXIT
 trap 'handle_signal INT 130' INT
 trap 'handle_signal TERM 143' TERM
 
+run_managed_command() {
+  local child_pid child_status=0
+  if command -v setsid >/dev/null 2>&1; then
+    setsid "$@" </dev/null &
+    child_pid=$!
+    # setsid 创建的新会话以子进程 PID 作为进程组 ID；先登记再 wait，避免信号竞态。
+    MONGO_ACTIVE_COMMAND_PID="$child_pid"
+    MONGO_ACTIVE_COMMAND_PGID="$child_pid"
+  else
+    "$@" </dev/null &
+    child_pid=$!
+    MONGO_ACTIVE_COMMAND_PID="$child_pid"
+    MONGO_ACTIVE_COMMAND_PGID=""
+  fi
+  wait "$child_pid" || child_status=$?
+  if [[ "$MONGO_ACTIVE_COMMAND_PID" == "$child_pid" ]]; then
+    MONGO_ACTIVE_COMMAND_PID=""
+    MONGO_ACTIVE_COMMAND_PGID=""
+  fi
+  return "$child_status"
+}
+
+run_package_manager() {
+  local timeout_seconds="${MONGO_PACKAGE_COMMAND_TIMEOUT:-900}" status=0
+  [[ "$timeout_seconds" =~ ^[1-9][0-9]*$ ]] || timeout_seconds=900
+  if command -v timeout >/dev/null 2>&1; then
+    run_managed_command timeout --signal=TERM --kill-after=10s "${timeout_seconds}s" "$@" || status=$?
+  else
+    # RHEL 系列的 coreutils 默认提供 timeout；其他精简系统缺失时仍保留可中断的进程组管理。
+    run_managed_command "$@" || status=$?
+  fi
+  if (( status == 124 || status == 137 )); then
+    printf '错误: 包管理命令等待超过 %s 秒，已终止: %s\n' "$timeout_seconds" "$1" >&2
+  fi
+  return "$status"
+}
+
 #==============================================================#
 #                         全局变量定义                         #
 #==============================================================#
-MONGO_INSTALL_VERSION="2.0.2"
+MONGO_INSTALL_VERSION="2.0.3"
 
 software_dir=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 script_name=$(basename "${BASH_SOURCE[0]}")
@@ -309,19 +422,31 @@ function create_mongo_symlinks() {
 #==============================================================#
 #                         颜色打印                             #
 #==============================================================#
+terminal_ansi_allowed() {
+  local output_fd="${1:-1}"
+  [[ "${TERM:-dumb}" != "dumb" && -z "${NO_COLOR+x}" ]] || return 1
+  [[ -t "$output_fd" ]]
+}
+
 function color_printf() {
   declare -u con_flag
   local text_primary="${2:-}" text_secondary="${3:-}" text_tertiary="${4:-}"
+  local output_fd=1
+  [[ "$1" == "red" ]] && output_fd=2
   declare -A color_map=(
-    ["red"]='\E[1;31m'
-    ["green"]='\E[1;32m'
-    ["blue"]='\E[1;34m'
-    ["yellow"]='\E[1;33m'
-    ["light_blue"]='\E[1;94m'
+    ["red"]='\033[1;31m'
+    ["green"]='\033[1;32m'
+    ["blue"]='\033[1;34m'
+    ["yellow"]='\033[1;33m'
+    ["light_blue"]='\033[1;94m'
     ["purple"]='\033[35m'
   )
-  local res='\E[0m' default_color='\E[1;32m'
+  local res='\033[0m' default_color='\033[1;32m'
   local color=${color_map[$1]:-"$default_color"}
+  if ! terminal_ansi_allowed "$output_fd"; then
+    color=""
+    res=""
+  fi
   case "$1" in
   "red")
     printf "\n${color}%-20s %-30s %-50s\n${res}\n" "$text_primary" "$text_secondary" "$text_tertiary" >&2
@@ -357,6 +482,7 @@ PROGRESS_CURRENT_STATE="idle"
 PROGRESS_FAILURE_CODE=0
 PROGRESS_RENDERED_LINES=0
 PROGRESS_LOG_FILE=""
+PROGRESS_PANEL_HEIGHT=11
 declare -a PROGRESS_HISTORY_ICON=()
 declare -a PROGRESS_HISTORY_NAME=()
 declare -a PROGRESS_HISTORY_DURATION=()
@@ -414,6 +540,50 @@ progress_set_stage() {
   PROGRESS_STAGE="$1"
 }
 
+progress_detect_mode() {
+  if [[ -z "${MONGO_PROGRESS_MODE:-}" ]]; then
+    if terminal_ansi_allowed 1 && [[ "$debug_flag" != "Y" ]]; then
+      MONGO_PROGRESS_MODE="ansi"
+    else
+      MONGO_PROGRESS_MODE="plain"
+    fi
+  fi
+  case "$MONGO_PROGRESS_MODE" in
+    ansi|plain) ;;
+    *) MONGO_PROGRESS_MODE="plain" ;;
+  esac
+}
+
+progress_terminal_prepare() {
+  progress_detect_mode
+  [[ "$MONGO_PROGRESS_MODE" == "ansi" ]] || return 0
+  (( PROGRESS_TERMINAL_ACTIVE == 0 )) || return 0
+
+  local rows
+  rows=$(tput lines 2>/dev/null || printf '%s' "${LINES:-0}")
+  [[ "$rows" =~ ^[0-9]+$ ]] || rows=0
+  if (( rows <= PROGRESS_PANEL_HEIGHT + 4 )); then
+    MONGO_PROGRESS_MODE="plain"
+    return 0
+  fi
+  PROGRESS_TERMINAL_ROWS=$rows
+  # 顶部保留固定面板，Logo、安装模式与后续提示只在下方滚动区域输出。
+  printf '\033[%d;%dr\033[%d;1H' \
+    "$((PROGRESS_PANEL_HEIGHT + 1))" "$PROGRESS_TERMINAL_ROWS" "$((PROGRESS_PANEL_HEIGHT + 1))"
+  PROGRESS_TERMINAL_ACTIVE=1
+}
+
+progress_terminal_restore() {
+  if (( PROGRESS_TERMINAL_ACTIVE )); then
+    printf '\033[r'
+    PROGRESS_TERMINAL_ACTIVE=0
+  fi
+  if (( PROGRESS_CURSOR_HIDDEN )); then
+    printf '\033[?25h'
+    PROGRESS_CURSOR_HIDDEN=0
+  fi
+}
+
 progress_init() {
   PROGRESS_TOTAL="${1:-0}"
   PROGRESS_LOG_FILE="${2:-$Mongoinstalllog}"
@@ -429,17 +599,7 @@ progress_init() {
   PROGRESS_HISTORY_NAME=()
   PROGRESS_HISTORY_DURATION=()
 
-  if [[ -z "${MONGO_PROGRESS_MODE:-}" ]]; then
-    if [[ -t 1 && "${TERM:-dumb}" != "dumb" && -z "${NO_COLOR:-}" && "$debug_flag" != "Y" ]]; then
-      MONGO_PROGRESS_MODE="ansi"
-    else
-      MONGO_PROGRESS_MODE="plain"
-    fi
-  fi
-  case "$MONGO_PROGRESS_MODE" in
-    ansi|plain) ;;
-    *) MONGO_PROGRESS_MODE="plain" ;;
-  esac
+  progress_detect_mode
 
   if [[ -L "$PROGRESS_LOG_FILE" || ( -e "$PROGRESS_LOG_FILE" && ! -f "$PROGRESS_LOG_FILE" ) ]]; then
     printf '错误: 日志路径不是安全的普通文件: %s\n' "$PROGRESS_LOG_FILE" >&2
@@ -469,8 +629,10 @@ progress_init() {
   if [[ "$MONGO_PROGRESS_MODE" == "plain" ]]; then
     printf 'MongoDB 自动安装\n'
   else
+    progress_terminal_prepare
     printf '\033[?25l'
     PROGRESS_CURSOR_HIDDEN=1
+    progress_render
   fi
 }
 
@@ -515,18 +677,25 @@ progress_render() {
     lines+=("$line")
   done
 
+  if (( PROGRESS_TERMINAL_ACTIVE )); then
+    # 保存下方滚动区光标，按绝对行号重绘固定面板，再原位恢复。
+    printf '\0337'
+    for ((i=0; i<PROGRESS_PANEL_HEIGHT; i++)); do
+      line="${lines[$i]:-}"
+      printf '\033[%d;1H\033[2K%s' "$((i + 1))" "$line"
+    done
+    printf '\0338'
+    PROGRESS_RENDERED_LINES=$PROGRESS_PANEL_HEIGHT
+    return 0
+  fi
+
+  # 无法安全建立滚动区域时退化为相对刷新，避免破坏小尺寸终端。
   if (( PROGRESS_RENDERED_LINES > 0 )); then
     printf '\033[%dA' "$PROGRESS_RENDERED_LINES"
   fi
   for line in "${lines[@]}"; do
     printf '\033[2K\r%s\n' "$line"
   done
-  if (( PROGRESS_RENDERED_LINES > ${#lines[@]} )); then
-    for ((i=${#lines[@]}; i<PROGRESS_RENDERED_LINES; i++)); do
-      printf '\033[2K\r\n'
-    done
-    printf '\033[%dA' "$((PROGRESS_RENDERED_LINES - ${#lines[@]}))"
-  fi
   PROGRESS_RENDERED_LINES=${#lines[@]}
 }
 
@@ -558,10 +727,7 @@ progress_start_spinner() {
 
 progress_close() {
   progress_stop_spinner
-  if (( PROGRESS_CURSOR_HIDDEN )); then
-    printf '\033[?25h'
-    PROGRESS_CURSOR_HIDDEN=0
-  fi
+  progress_terminal_restore
   [[ "$MONGO_PROGRESS_MODE" == "ansi" ]] && printf '\n'
 }
 
@@ -1448,13 +1614,25 @@ function check_packages() {
 #                   安装依赖包                                 #
 #==============================================================#
 function prepare_os_packages_root() {
-  local extract_dir entry archive_list
+  local extract_dir entry archive_list archive_verbose
   [[ -d "$os_packages_root" ]] && return 0
   [[ -f "$os_packages_archive" && ! -L "$os_packages_archive" ]] || return 3
   archive_list=$(mktemp /tmp/mongo-os-packages.list.XXXXXX) || return 1
+  archive_verbose=$(mktemp /tmp/mongo-os-packages.verbose.XXXXXX) || return 1
   MONGO_INSTALL_TMPFILES+=("$archive_list")
-  tar tzf "$os_packages_archive" > "$archive_list" || {
+  MONGO_INSTALL_TMPFILES+=("$archive_verbose")
+  # 单次详细列表同时验证条目类型并取得路径；验证通过后才进行第二次读取解压。
+  LC_ALL=C tar --numeric-owner --quoting-style=escape -tvzf "$os_packages_archive" > "$archive_verbose" || {
     echo "错误: 无法读取 mongdb-offline-rpm.tar.gz" >&2
+    return 1
+  }
+  awk '
+    NF != 6 { bad=1; next }
+    substr($1,1,1) != "-" && substr($1,1,1) != "d" { bad=1; next }
+    { print $6 }
+    END { exit bad }
+  ' "$archive_verbose" > "$archive_list" || {
+    echo "错误: mongdb-offline-rpm.tar.gz 仅允许不含空白字符的普通文件和目录" >&2
     return 1
   }
   while IFS= read -r entry; do
@@ -1470,13 +1648,6 @@ function prepare_os_packages_root() {
       return 1
     }
   done < "$archive_list"
-  tar tvzf "$os_packages_archive" | awk '
-    substr($1,1,1) != "-" && substr($1,1,1) != "d" { bad=1 }
-    END { exit bad }
-  ' || {
-    echo "错误: mongdb-offline-rpm.tar.gz 不允许包含符号链接、硬链接或设备文件" >&2
-    return 1
-  }
   extract_dir=$(mktemp -d /tmp/mongo-os-packages.XXXXXX) || return 1
   MONGO_INSTALL_TMPDIRS+=("$extract_dir")
   tar --no-same-owner --no-same-permissions -xzf "$os_packages_archive" -C "$extract_dir" || return 1
@@ -1578,9 +1749,9 @@ function install_os_offline_bundle() {
         }
       done
       if command -v dnf >/dev/null 2>&1; then
-        dnf --disablerepo='*' install -y -q "${package_files[@]}"
+        run_package_manager dnf --disablerepo='*' install -y -q "${package_files[@]}"
       elif command -v yum >/dev/null 2>&1; then
-        yum --disablerepo='*' localinstall -y -q "${package_files[@]}"
+        run_package_manager yum --disablerepo='*' localinstall -y -q "${package_files[@]}"
       else
         rpm -Uvh --replacepkgs "${package_files[@]}"
       fi
@@ -1633,7 +1804,7 @@ function import_system_rpm_signing_key() {
 function install_os_iso_packages() {
   local -a packages=("$@") repo_args=()
   local -a iso_missing=()
-  local iso_root="${os_iso_root:-}" package_name yum_repo_dir iso_package_names repo_id
+  local iso_root="${os_iso_root:-}" package_name yum_repo_dir iso_package_names repo_id query_file
   (( ${#packages[@]} > 0 )) || return 0
   [[ -n "$iso_root" ]] || return 3
   [[ -d "$iso_root" ]] || {
@@ -1661,13 +1832,17 @@ function install_os_iso_packages() {
       # 逐包安装：ISO 中不存在的包不会阻止其他基础依赖安装，缺失项随后由
       # mongdb-offline-rpm.tar.gz 补充。
       if command -v dnf >/dev/null 2>&1; then
+        query_file=$(mktemp /tmp/mongo-os-iso-query.XXXXXX) || return 1
+        MONGO_INSTALL_TMPFILES+=("$query_file")
         for package_name in "${packages[@]}"; do
-          if ! dnf -q --disablerepo='*' "${repo_args[@]}" repoquery --available \
-            --qf '%{name}' "$package_name" 2>/dev/null | grep -Fxq "$package_name"; then
+          : > "$query_file"
+          if ! run_package_manager dnf -q --disablerepo='*' "${repo_args[@]}" repoquery --available \
+            --qf '%{name}' "$package_name" > "$query_file" 2>/dev/null \
+            || ! grep -Fxq "$package_name" "$query_file"; then
             iso_missing+=("$package_name")
             continue
           fi
-          dnf --disablerepo='*' "${repo_args[@]}" install -y -q "$package_name" || {
+          run_package_manager dnf --disablerepo='*' "${repo_args[@]}" install -y -q "$package_name" || {
             printf '错误: 从 OS ISO 安装已存在的软件包失败（保留 GPG 校验）: %s\n' "$package_name" >&2
             return 1
           }
@@ -1710,7 +1885,7 @@ EOF
             iso_missing+=("$package_name")
             continue
           fi
-          yum --disablerepo='*' --setopt="reposdir=${yum_repo_dir}" \
+          run_package_manager yum --disablerepo='*' --setopt="reposdir=${yum_repo_dir}" \
             --enablerepo='mongodb-os-*' install -y -q "$package_name" || {
             printf '错误: 从 OS ISO 安装已存在的软件包失败（保留 GPG 校验）: %s\n' "$package_name" >&2
             return 1
@@ -1736,7 +1911,7 @@ function pkg_install() {
   local -a required_commands=(tar awk grep sed find sort sha256sum ss ip ps)
   local -a optional_commands=(numactl netstat sar lsof logrotate)
   local -a required_packages=() optional_packages=()
-  local command_name install_status=0 warning_status=0 repositories_available=1
+  local command_name install_status=0 warning_status=0 repositories_available=1 repo_list_file=""
 
   if (( HAS_SYSTEMD )); then
     required_commands+=(systemctl hostnamectl)
@@ -1819,23 +1994,30 @@ function pkg_install() {
   case "$os_distro_family" in
     rhel)
       if command -v dnf >/dev/null 2>&1; then
-        dnf -q repolist 2>/dev/null | awk 'NR>1{found=1} END{exit !found}' || repositories_available=0
+        if (( ${#required_packages[@]} > 0 || ${#optional_packages[@]} > 0 )); then
+          repo_list_file=$(mktemp /tmp/mongo-os-repolist.XXXXXX) || return 1
+          MONGO_INSTALL_TMPFILES+=("$repo_list_file")
+          if ! run_package_manager dnf -q repolist > "$repo_list_file" 2>/dev/null \
+            || ! awk 'NR>1{found=1} END{exit !found}' "$repo_list_file"; then
+            repositories_available=0
+          fi
+        fi
         if (( ${#required_packages[@]} > 0 )); then
           (( repositories_available == 1 )) || {
             printf '错误: 缺少必需命令且没有可用 DNF 仓库: %s\n' "${required_commands[*]}" >&2
             return 1
           }
-          dnf install -y -q "${required_packages[@]}" || install_status=$?
+          run_package_manager dnf install -y -q "${required_packages[@]}" || install_status=$?
         fi
         if (( repositories_available == 1 && ${#optional_packages[@]} > 0 )); then
-          dnf install -y -q "${optional_packages[@]}" || warning_status=3
+          run_package_manager dnf install -y -q "${optional_packages[@]}" || warning_status=3
         fi
       elif command -v yum >/dev/null 2>&1; then
         if (( ${#required_packages[@]} > 0 )); then
-          yum install -y -q "${required_packages[@]}" || install_status=$?
+          run_package_manager yum install -y -q "${required_packages[@]}" || install_status=$?
         fi
         if (( ${#optional_packages[@]} > 0 )); then
-          yum install -y -q "${optional_packages[@]}" || warning_status=3
+          run_package_manager yum install -y -q "${optional_packages[@]}" || warning_status=3
         fi
       elif (( ${#required_packages[@]} > 0 )); then
         echo "错误: 缺少必需命令且未找到 dnf/yum" >&2
@@ -3355,11 +3537,12 @@ ASKPASSEOF
 function run_with_ssh_password() {
   ensure_ssh_askpass_helper || return 1
   [[ -n "$remote_root_pass" ]] || return 1
-  DISPLAY=mongodb-install:0 \
+  run_managed_command env \
+    DISPLAY=mongodb-install:0 \
     SSH_ASKPASS="${mongo_ssh_askpass_dir}/askpass" \
     SSH_ASKPASS_REQUIRE=force \
     MONGO_SSH_ASKPASS_SECRET="$remote_root_pass" \
-    setsid "$@" </dev/null
+    "$@"
 }
 
 function password_remote_exec() {
@@ -3881,7 +4064,8 @@ RSVCEOF
 
 function deploy_remote_nodes() {
   [[ "$mongo_install_mode" == "replicaset" ]] || return 0
-  local local_ip host endpoint log_file pid index batch_count=0 failure=0 remote_count=0
+  local local_ip host endpoint log_file pid worker_pgid index batch_index batch_count=0 failure=0 remote_count=0
+  local monitor_mode_was_enabled=0
   local app_pkg local_app_fingerprint expected_version
   local -a remote_hosts=() remote_endpoints=()
   local -a batch_pids=() batch_logs=() batch_hosts=() batch_endpoints=()
@@ -3917,31 +4101,45 @@ function deploy_remote_nodes() {
     endpoint=${remote_endpoints[$index]}
     log_file=$(mktemp /tmp/mongo-remote-deploy.XXXXXX.log) || return 1
     MONGO_INSTALL_TMPFILES+=("$log_file")
+    case $- in *m*) monitor_mode_was_enabled=1 ;; *) monitor_mode_was_enabled=0; set -m ;; esac
     (deploy_remote_node "$host" "$endpoint" "$app_pkg" "$local_app_fingerprint" "$expected_version") >"$log_file" 2>&1 &
-    batch_pids+=("$!")
-    MONGO_REMOTE_DEPLOY_PIDS+=("$!")
+    pid=$!
+    (( monitor_mode_was_enabled == 1 )) || set +m
+    # 非交互 Bash 的 monitor 模式为每个后台 worker 建立独立进程组。
+    worker_pgid=$pid
+    batch_pids+=("$pid")
+    MONGO_REMOTE_DEPLOY_PIDS+=("$pid")
+    MONGO_REMOTE_DEPLOY_PGIDS+=("$worker_pgid")
     batch_logs+=("$log_file")
     batch_hosts+=("$host")
     batch_endpoints+=("$endpoint")
     ((batch_count++))
 
     if (( batch_count >= mongo_remote_parallelism )); then
-      for ((index=0; index<batch_count; index++)); do
-        pid=${batch_pids[$index]}
+      for ((batch_index=0; batch_index<batch_count; batch_index++)); do
+        pid=${batch_pids[$batch_index]}
         wait "$pid" || failure=1
-        printf '%s\n' "--- ${batch_hosts[$index]} (${batch_endpoints[$index]}) ---"
-        cat "${batch_logs[$index]}"
+        MONGO_REMOTE_DEPLOY_PIDS[$batch_index]=""
+        MONGO_REMOTE_DEPLOY_PGIDS[$batch_index]=""
+        printf '%s\n' "--- ${batch_hosts[$batch_index]} (${batch_endpoints[$batch_index]}) ---"
+        cat "${batch_logs[$batch_index]}"
       done
       batch_pids=(); batch_logs=(); batch_hosts=(); batch_endpoints=(); batch_count=0
+      MONGO_REMOTE_DEPLOY_PIDS=()
+      MONGO_REMOTE_DEPLOY_PGIDS=()
     fi
   done
 
-  for ((index=0; index<batch_count; index++)); do
-    pid=${batch_pids[$index]}
+  for ((batch_index=0; batch_index<batch_count; batch_index++)); do
+    pid=${batch_pids[$batch_index]}
     wait "$pid" || failure=1
-    printf '%s\n' "--- ${batch_hosts[$index]} (${batch_endpoints[$index]}) ---"
-    cat "${batch_logs[$index]}"
+    MONGO_REMOTE_DEPLOY_PIDS[$batch_index]=""
+    MONGO_REMOTE_DEPLOY_PGIDS[$batch_index]=""
+    printf '%s\n' "--- ${batch_hosts[$batch_index]} (${batch_endpoints[$batch_index]}) ---"
+    cat "${batch_logs[$batch_index]}"
   done
+  MONGO_REMOTE_DEPLOY_PIDS=()
+  MONGO_REMOTE_DEPLOY_PGIDS=()
   (( failure == 0 )) || {
     echo "错误: 至少一个远程节点部署失败" >&2
     return 1
@@ -4757,6 +4955,27 @@ MongoDB 一键安装脚本 (单机 + 副本集) v${MONGO_INSTALL_VERSION}
   CentOS 7: MongoDB 6.0、7.0（遗留兼容；8.x 会在安装前拒绝）
 HELPEOF
 }
+
+select_install_mode() {
+  echo
+  echo "请选择安装模式:"
+  echo
+  echo "  [1] single       单机模式    适用于开发测试及中小型应用"
+  echo "  [2] replicaset   副本集模式  多节点高可用"
+  echo
+  while true; do
+    printf "请输入编号或模式名称 [1-2/si/rs]: "
+    if ! IFS= read -r _mode_input; then
+      printf '\n错误: 安装模式输入已结束，取消安装\n' >&2
+      return 1
+    fi
+    case "${_mode_input,,}" in
+      1|single|si)      mongo_install_mode="single";     return 0 ;;
+      2|replicaset|rs)  mongo_install_mode="replicaset"; return 0 ;;
+      *) echo "  无效输入，请重新选择" ;;
+    esac
+  done
+}
 #==============================================================#
 #             主函数                                           #
 #==============================================================#
@@ -5019,7 +5238,11 @@ function main() {
     echo "错误: 无法规范化安装、数据或备份目录" >&2
     return 1
   }
-  [[ -t 1 && "${TERM:-dumb}" != "dumb" ]] && clear
+  progress_detect_mode
+  if [[ "$MONGO_PROGRESS_MODE" == "ansi" ]]; then
+    clear
+    progress_terminal_prepare
+  fi
   logo_print
   echo
   check_prerequisites
@@ -5054,23 +5277,7 @@ function main() {
 
   # 交互式选择模式
   if [[ -z "$mongo_install_mode" ]]; then
-    echo
-    echo "请选择安装模式:"
-    echo
-    echo "  [1] single       单机模式    适用于开发测试及中小型应用"
-    echo "  [2] replicaset   副本集模式  多节点高可用"
-    echo
-    while true; do
-      printf "请输入编号或模式名称 [1-2/si/rs]: "
-      read -r _mode_input
-      case "${_mode_input,,}" in
-        1|single|si)      mongo_install_mode="single";     break ;;
-        2|replicaset|rs)  mongo_install_mode="replicaset"; break ;;
-        *)
-          echo "  无效输入，请重新选择"
-          ;;
-      esac
-    done
+    select_install_mode || return $?
   else
     case "$mongo_install_mode" in
       single|si)      mongo_install_mode="single" ;;

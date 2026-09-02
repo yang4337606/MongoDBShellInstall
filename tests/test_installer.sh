@@ -370,13 +370,27 @@ if declare -F validate_os_package_bundle >/dev/null; then
   os_packages_archive="${archive_fixture}/mongdb-offline-rpm.tar.gz"
   os_packages_root="${archive_fixture}/not-extracted"
   os_packages_dir=''
+  tar_call_count=0
+  tar() {
+    ((tar_call_count++))
+    command tar "$@"
+  }
   if prepare_os_packages_root \
     && [[ "$os_packages_root" == */mongdb-offline-rpm ]] \
-    && validate_os_package_bundle "${os_packages_root}/centos/7/x86_64"; then
+    && validate_os_package_bundle "${os_packages_root}/centos/7/x86_64" \
+    && (( tar_call_count == 2 )); then
     pass "extract requested archive and resolve centos/7/x86_64 layout"
   else
     fail "extract requested archive and resolve centos/7/x86_64 layout"
   fi
+  unset -f tar
+
+  mkdir -p "${archive_fixture}/unsafe/mongdb-offline-rpm/centos/7/x86_64"
+  ln -s /etc/passwd "${archive_fixture}/unsafe/mongdb-offline-rpm/centos/7/x86_64/link.rpm"
+  command tar -C "${archive_fixture}/unsafe" -czf "${archive_fixture}/unsafe.tar.gz" mongdb-offline-rpm
+  os_packages_archive="${archive_fixture}/unsafe.tar.gz"
+  os_packages_root="${archive_fixture}/unsafe-not-extracted"
+  assert_failure "reject links while using one archive metadata scan" prepare_os_packages_root
   os_packages_archive="$original_os_packages_archive"
   os_packages_root="$original_os_packages_root"
   os_packages_dir="$original_os_packages_dir"
@@ -429,6 +443,118 @@ if declare -F format_duration >/dev/null && declare -F build_progress_bar >/dev/
     || fail "installation timer remains in memory for final display"
 else
   fail "progress formatting helpers exist"
+fi
+
+if declare -F color_printf >/dev/null && declare -F progress_terminal_prepare >/dev/null; then
+  color_output=$(NO_COLOR=1 color_printf green "no-color" 2>&1)
+  if [[ "$color_output" != *$'\033'* ]]; then
+    pass "NO_COLOR suppresses color control sequences"
+  else
+    fail "NO_COLOR suppresses color control sequences"
+  fi
+  color_output=$(color_printf green "non-tty" 2>&1)
+  if [[ "$color_output" != *$'\033'* ]]; then
+    pass "non-TTY output suppresses color control sequences"
+  else
+    fail "non-TTY output suppresses color control sequences"
+  fi
+
+  tput() {
+    [[ "${1:-}" == "lines" ]] && printf '40\n'
+  }
+  progress_terminal_output=$(
+    MONGO_PROGRESS_MODE=ansi
+    PROGRESS_TERMINAL_ACTIVE=0
+    PROGRESS_CURSOR_HIDDEN=0
+    PROGRESS_TOTAL=30
+    PROGRESS_COMPLETED=18
+    progress_terminal_prepare
+    progress_render
+    progress_terminal_restore
+  )
+  unset -f tput
+  if [[ "$progress_terminal_output" == *$'\033[12;40r'* \
+    && "$progress_terminal_output" == *$'\033[1;1H'* \
+    && "$progress_terminal_output" == *$'\033[r'* ]]; then
+    pass "ANSI progress reserves a fixed top panel and restores the scroll region"
+  else
+    fail "ANSI progress reserves a fixed top panel and restores the scroll region"
+  fi
+else
+  fail "color and fixed progress helpers exist"
+fi
+
+if declare -F select_install_mode >/dev/null; then
+  mode_output=$(select_install_mode </dev/null 2>&1)
+  mode_status=$?
+  if (( mode_status != 0 )) && [[ "$mode_output" == *"安装模式输入已结束"* ]] \
+    && [[ "$mode_output" != *"无效输入，请重新选择"* ]]; then
+    pass "interactive mode selection exits cleanly on EOF"
+  else
+    fail "interactive mode selection exits cleanly on EOF"
+  fi
+else
+  fail "interactive mode selector exists"
+fi
+
+if declare -F run_package_manager >/dev/null; then
+  package_wait_started=$(date +%s)
+  package_wait_output=$(MONGO_PACKAGE_COMMAND_TIMEOUT=1 run_package_manager bash -c 'sleep 30' 2>&1)
+  package_wait_status=$?
+  package_wait_elapsed=$(($(date +%s) - package_wait_started))
+  if (( package_wait_status == 124 && package_wait_elapsed < 8 )) \
+    && [[ "$package_wait_output" == *"等待超过 1 秒"* ]]; then
+    pass "package manager wait is bounded and reports timeout"
+  else
+    fail "package manager wait is bounded and reports timeout"
+  fi
+else
+  fail "bounded package manager runner exists"
+fi
+
+if declare -F cleanup_on_exit >/dev/null; then
+  process_test_dir=$(mktemp -d)
+  process_pid_file="${process_test_dir}/child.pid"
+  process_marker="MONGO_PROCESS_TREE_TEST_${$}"
+  (
+    MONGO_INSTALL_TMPFILES=()
+    MONGO_INSTALL_TMPDIRS=()
+    MONGO_REMOTE_DEPLOY_PIDS=()
+    MONGO_REMOTE_DEPLOY_PGIDS=()
+    MONGO_ACTIVE_COMMAND_PID=""
+    MONGO_ACTIVE_COMMAND_PGID=""
+    MONGO_CLEANUP_RUNNING=0
+    set -m
+    (
+      bash -c 'printf "%s\n" "$$" > "$1"; exec -a "$2" sleep 30' \
+        bash "$process_pid_file" "$process_marker"
+    ) &
+    process_worker_pid=$!
+    set +m
+    MONGO_REMOTE_DEPLOY_PIDS+=("$process_worker_pid")
+    MONGO_REMOTE_DEPLOY_PGIDS+=("$process_worker_pid")
+    for _ in {1..20}; do
+      [[ -s "$process_pid_file" ]] && break
+      sleep 0.05
+    done
+    [[ -s "$process_pid_file" ]] || exit 2
+    process_child_pid=$(<"$process_pid_file")
+    cleanup_on_exit
+    ! kill -0 "$process_child_pid" 2>/dev/null
+  )
+  process_tree_status=$?
+  if [[ -s "$process_pid_file" ]]; then
+    process_child_pid=$(<"$process_pid_file")
+    kill "$process_child_pid" 2>/dev/null || true
+  fi
+  rm -rf "$process_test_dir"
+  if (( process_tree_status == 0 )); then
+    pass "signal cleanup terminates a remote worker process tree"
+  else
+    fail "signal cleanup terminates a remote worker process tree"
+  fi
+else
+  fail "process-tree cleanup helper exists"
 fi
 
 if declare -F calculate_app_fingerprint >/dev/null; then
@@ -622,6 +748,10 @@ assert_file_contains "systemd permits an external data directory" "$installer" '
 assert_file_contains "remote deployment restarts upgraded mongod" "$installer" 'systemctl[[:space:]]+restart[[:space:]]+mongod\.service'
 assert_file_contains "remote nodes are deployed by background workers" "$installer" 'deploy_remote_node[^&]*&'
 assert_file_contains "signal cleanup stops active remote deployment workers" "$installer" 'MONGO_REMOTE_DEPLOY_PIDS'
+assert_file_contains "remote deployment workers have tracked process groups" "$installer" 'MONGO_REMOTE_DEPLOY_PGIDS'
+assert_file_contains "progress panel uses absolute top-row rendering" "$installer" "printf '\\\\033\\[%d;1H"
+assert_file_contains "progress cleanup restores the full scroll region" "$installer" "printf '\\\\033\\[r'"
+assert_file_not_contains "DNF and YUM calls use the bounded runner" "$installer" '^[[:space:]]*(dnf|yum)[[:space:]]'
 assert_file_contains "same-version binary transfer uses application fingerprint" "$installer" '应用指纹一致，跳过二进制传输与解压'
 assert_file_contains "one application archive is reused by parallel workers" "$installer" '供 .* 个远程节点复用'
 assert_file_contains "SSH connections are multiplexed through a private control directory" "$installer" 'ControlMaster=auto'
@@ -700,6 +830,19 @@ assert_success "all short options are accepted by the real CLI parser" \
     -tcd /tmp/test-members -cam x509 -bi 127.0.0.1 -as 10.0.0.0/8 \
     -op 2048 -mc 32768 -j 2 -oo -dbg -br 14 -mv 8.0.29 \
     -mp 8.0.29 -oir /mnt/rhel8 -opd /tmp/test-rpms -np -y -h
+xtrace_secret="MONGO_XTRACE_SECRET_${$}_DO_NOT_PRINT"
+xtrace_output=$(bash -x "$installer" -rp "$xtrace_secret" -h 2>&1)
+if [[ "$xtrace_output" != *"$xtrace_secret"* ]]; then
+  pass "caller xtrace is disabled before password argument parsing"
+else
+  fail "caller xtrace is disabled before password argument parsing"
+fi
+help_output=$(NO_COLOR=1 bash "$installer" -h 2>&1)
+if [[ "$help_output" != *$'\033'* && "$help_output" != *'\E'* && "$help_output" != *'\033'* ]]; then
+  pass "help output contains no ANSI or literal escape tokens"
+else
+  fail "help output contains no ANSI or literal escape tokens"
+fi
 assert_file_contains "hostname defaults to mongodb base" "$installer" '^hostname="mongodb"$'
 assert_file_contains "authentication summary includes account password" "$installer" '管理员密码[[:space:]]*:.*mongo_admin_pass'
 assert_file_contains "authentication summary includes mechanism" "$installer" '认证方式[[:space:]]*:.*mongo_auth_mechanism'
