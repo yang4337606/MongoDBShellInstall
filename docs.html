@@ -209,7 +209,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:100%;pointe
   centos/
     7/x86_64/</div>
 </div>
-<p><code>mongdb-offline-rpm.tar.gz</code> 仅在指定 ISO 确实缺少依赖时提供；归档内部只允许包含 RPM 依赖包，不放清单、校验文件或其他辅助文件，也不增加 SHA256SUMS 校验。当前测试使用的 RHEL 8/9、Rocky Linux 8/9 与 CentOS 7 完整 DVD ISO 已包含安装所需系统依赖，因此无需补充包。密码首次登录改用 OpenSSH 原生 <code>SSH_ASKPASS</code> 建立 Ed25519 公钥信任，不再依赖 <code>sshpass</code>。<code>tools/build_offline_rpm_bundle.sh</code> 仅供维护者在更换 ISO 或增加 OS/架构并确认实际缺包后重建介质。安装时先尝试 <code>--os-iso-root</code> 指定的已挂载 ISO，再使用确有需要的补充包，最后才尝试在线仓库。</p>
+<p><code>mongdb-offline-rpm.tar.gz</code> 仅在 ISO 确实缺少依赖时提供；归档内部只允许包含 RPM 依赖包，不放清单、校验文件或其他辅助文件，也不增加 SHA256SUMS 校验。当前测试使用的 RHEL 8/9、Rocky Linux 8/9 与 CentOS 7 完整 DVD ISO 已包含安装所需系统依赖，因此无需补充包。密码首次登录改用 OpenSSH 原生 <code>SSH_ASKPASS</code> 建立 Ed25519 公钥信任，不再依赖 <code>sshpass</code>。<code>tools/build_offline_rpm_bundle.sh</code> 仅供维护者在更换 ISO 或增加 OS/架构并确认实际缺包后重建介质。未指定 <code>--os-iso-root</code> 时，安装器会先复用已挂载的本机 iso9660，再检测并只读挂载本机光驱；之后使用确有需要的补充包，最后才尝试在线仓库。</p>
 <div class="note"><strong>提示：</strong>只有一个 MongoDB Server 包时自动选择；有多个时交互选择。非交互安装存在多个包时必须通过 <code>--mongo-package</code> 指定文件名或版本。脚本会校验 Server 包和 OS 离线包，Server 包文件名不得包含 "database-tools" 或 "mongosh"。</div>
 
 <h2 id="media">安装介质</h2>
@@ -381,7 +381,7 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:100%;pointe
 <tr><td>-oo, --os-only</td><td>仅配置操作系统，不安装 MongoDB</td><td>N</td></tr>
 <tr><td>-mv, --mongo-version</td><td>OS-only 模式的目标版本，用于选择正确 THP 策略</td><td>未知时保持 THP</td></tr>
 <tr><td>-mp, --mongo-package</td><td>多个 MongoDB Server 包时指定文件名或版本；只有一个时自动选择</td><td>自动/交互选择</td></tr>
-<tr><td>-oir, --os-iso-root</td><td>已挂载 OS ISO 根目录；优先从 ISO 安装系统依赖</td><td>-</td></tr>
+<tr><td>-oir, --os-iso-root</td><td>已挂载 OS ISO 根目录；未指定时自动检测本机 iso9660 光驱并只读挂载，优先从 ISO 安装系统依赖</td><td>-</td></tr>
 <tr><td>-opd, --os-packages-dir</td><td>已解压 OS 离线补充包的平台目录（高级覆盖）</td><td>归档内自动匹配</td></tr>
 <tr><td>-dbg, --debug</td><td>开启调试模式</td><td>N</td></tr>
 <tr><td>-np, --no-progress</td><td>禁用 ANSI 动画，使用逐行日志输出</td><td>自动检测</td></tr>
@@ -541,6 +541,16 @@ body::after{content:'';position:fixed;top:0;left:0;width:100%;height:100%;pointe
 <p>不可以。脚本为该用户配置 <code>/sbin/nologin</code> 并锁定密码，将其同名组设为主组。MongoDB 通过 systemd 以同一用户和组（例如 <code>User=mongoops</code>、<code>Group=mongoops</code>）运行。</p>
 
 <h2 id="changelog">更新日志</h2>
+
+<h3>v2.0.4 (2026-09)</h3>
+<ul>
+<li>修复步骤内直接退出、Ctrl+C 和 TERM 时恢复序列被日志重定向吞掉的问题，确保物理光标和滚动区域复原</li>
+<li>自动复用已挂载 iso9660，或通过 <code>blkid</code> 检测并只读挂载本机光驱；退出时仅卸载安装器创建的临时挂载</li>
+<li>在系统变更前实际执行 mongosh 与 Database Tools 二进制兼容性预检，并保留原始退出码</li>
+<li>移除未使用的 net-tools、sysstat、lsof 依赖；单 NUMA 系统不再安装 numactl</li>
+<li>参数、拓扑和依赖介质检查纳入进度；无认证与 X.509 模式不再计算空 keyFile 步骤</li>
+<li>远程部署在失败批次收敛后停止启动后续节点并保留首个失败码；按发布要求不增加复制后 SHA-256 校验</li>
+</ul>
 
 <h3>v2.0.3 (2026-09)</h3>
 <ul>

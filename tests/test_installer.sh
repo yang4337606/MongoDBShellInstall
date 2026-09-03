@@ -403,6 +403,52 @@ else
   fail "OS offline bundle validator exists"
 fi
 
+if declare -F discover_os_iso_root >/dev/null && declare -F is_os_iso_repo_root >/dev/null; then
+  iso_discovery_tmp=$(mktemp -d)
+  mkdir -p "${iso_discovery_tmp}/BaseOS/repodata"
+  : > "${iso_discovery_tmp}/BaseOS/repodata/repomd.xml"
+  original_os_iso_root="$os_iso_root"
+  original_os_distro_family="$os_distro_family"
+  os_iso_root=''
+  os_distro_family=rhel
+  findmnt() {
+    if [[ "$*" == *'-t iso9660'* ]]; then
+      printf '%s\n' "$iso_discovery_tmp"
+      return 0
+    fi
+    return 1
+  }
+  if discover_os_iso_root && [[ "$os_iso_root" == "$iso_discovery_tmp" ]]; then
+    pass "mounted iso9660 media is discovered without requiring --os-iso-root"
+  else
+    fail "mounted iso9660 media is discovered without requiring --os-iso-root"
+  fi
+  unset -f findmnt
+  os_iso_root="$original_os_iso_root"
+  os_distro_family="$original_os_distro_family"
+  rm -rf "$iso_discovery_tmp"
+else
+  fail "OS optical-media discovery helpers exist"
+fi
+
+if declare -F probe_packaged_binary >/dev/null; then
+  binary_probe_tmp=$(mktemp -d)
+  mkdir -p "${binary_probe_tmp}/mongosh-audit/bin"
+  printf '%s\n' '#!/usr/bin/env bash' 'exit 42' > "${binary_probe_tmp}/mongosh-audit/bin/mongosh"
+  chmod 755 "${binary_probe_tmp}/mongosh-audit/bin/mongosh"
+  tar czf "${binary_probe_tmp}/mongosh-audit.tgz" -C "$binary_probe_tmp" mongosh-audit
+  probe_packaged_binary mongosh "${binary_probe_tmp}/mongosh-audit.tgz" 'mongosh-*' bin/mongosh >/dev/null 2>&1
+  probe_status=$?
+  if (( probe_status == 42 )); then
+    pass "auxiliary binary preflight preserves its runtime failure code"
+  else
+    fail "auxiliary binary preflight preserves its runtime failure code"
+  fi
+  rm -rf "$binary_probe_tmp"
+else
+  fail "auxiliary packaged-binary preflight exists"
+fi
+
 if declare -F mongo_thp_mode >/dev/null; then
   [[ "$(mongo_thp_mode 8)" == "enable" ]] && pass "MongoDB 8 selects enabled THP" || fail "MongoDB 8 selects enabled THP"
   [[ "$(mongo_thp_mode 7)" == "disable" ]] && pass "MongoDB 7 selects disabled THP" || fail "MongoDB 7 selects disabled THP"
@@ -443,6 +489,44 @@ if declare -F format_duration >/dev/null && declare -F build_progress_bar >/dev/
     || fail "installation timer remains in memory for final display"
 else
   fail "progress formatting helpers exist"
+fi
+
+if declare -F calculate_total_steps >/dev/null; then
+  original_only_conf_os="$only_conf_os"
+  original_install_mode="$mongo_install_mode"
+  original_auth_enabled="$mongo_auth_enabled"
+  original_tls_enabled="$mongo_tls_enabled"
+  original_cluster_auth_mode="$mongo_cluster_auth_mode"
+  original_remote_root_pass="$remote_root_pass"
+  original_remote_root_pass_file="$remote_root_pass_file"
+  original_ssh_identity_file="$ssh_identity_file"
+  only_conf_os=N; mongo_install_mode=single; mongo_auth_enabled=N; mongo_tls_enabled=N
+  remote_root_pass=''; remote_root_pass_file=''; ssh_identity_file=''
+  [[ "$(calculate_total_steps)" == 26 ]] \
+    && pass "single online/offline paths count only their real 26 steps" \
+    || fail "single online/offline paths count only their real 26 steps"
+  mongo_install_mode=replicaset; mongo_auth_enabled=N; mongo_cluster_auth_mode=keyFile
+  [[ "$(calculate_total_steps)" == 29 ]] \
+    && pass "unauthenticated replica set omits the no-op keyFile step" \
+    || fail "unauthenticated replica set omits the no-op keyFile step"
+  mongo_auth_enabled=Y; mongo_tls_enabled=Y; mongo_cluster_auth_mode=x509
+  [[ "$(calculate_total_steps)" == 32 ]] \
+    && pass "X.509 replica set omits the no-op keyFile step" \
+    || fail "X.509 replica set omits the no-op keyFile step"
+  only_conf_os=Y
+  [[ "$(calculate_total_steps)" == 11 ]] \
+    && pass "OS-only mode includes parameter and media preflight steps" \
+    || fail "OS-only mode includes parameter and media preflight steps"
+  only_conf_os="$original_only_conf_os"
+  mongo_install_mode="$original_install_mode"
+  mongo_auth_enabled="$original_auth_enabled"
+  mongo_tls_enabled="$original_tls_enabled"
+  mongo_cluster_auth_mode="$original_cluster_auth_mode"
+  remote_root_pass="$original_remote_root_pass"
+  remote_root_pass_file="$original_remote_root_pass_file"
+  ssh_identity_file="$original_ssh_identity_file"
+else
+  fail "dynamic progress-step calculator exists"
 fi
 
 if declare -F color_printf >/dev/null && declare -F progress_terminal_prepare >/dev/null; then
@@ -575,6 +659,43 @@ if declare -F calculate_app_fingerprint >/dev/null; then
   rm -rf "$fingerprint_tmp"
 else
   fail "application fingerprint helper exists"
+fi
+
+if declare -F deploy_remote_nodes >/dev/null; then
+  if (
+    deploy_test_tmp=$(mktemp -d)
+    env_base_dir="${deploy_test_tmp}/root"
+    env_app_dir="${env_base_dir}/app"
+    mkdir -p "${env_app_dir}/bin"
+    printf 'binary\n' > "${env_app_dir}/bin/mongod"
+    hosts_array=(h1 h2 h3 h4 h5)
+    remote_ips_array=(e1 e2 e3 e4 e5)
+    mongo_install_mode=replicaset
+    mongo_remote_parallelism=2
+    mongo_major_ver=8; mongo_minor_ver=0; mongo_patch_ver=17
+    get_local_ip() { printf 'local'; }
+    is_local_host() { return 1; }
+    calculate_app_fingerprint() { printf 'fingerprint'; }
+    deploy_remote_node() {
+      printf '%s\n' "$1" >> "${deploy_test_tmp}/launches"
+      [[ "$1" == h1 ]] && return 42
+      return 0
+    }
+    deploy_remote_nodes >/dev/null 2>&1
+    deploy_status=$?
+    deploy_launches=$(wc -l < "${deploy_test_tmp}/launches")
+    for deploy_tmp_file in ${MONGO_INSTALL_TMPFILES[@]+"${MONGO_INSTALL_TMPFILES[@]}"}; do
+      [[ -f "$deploy_tmp_file" ]] && rm -f "$deploy_tmp_file"
+    done
+    rm -rf "$deploy_test_tmp"
+    (( deploy_status == 42 && deploy_launches == 2 ))
+  ); then
+    pass "remote deployment preserves first failure and does not launch later batches"
+  else
+    fail "remote deployment preserves first failure and does not launch later batches"
+  fi
+else
+  fail "parallel remote deployment helper exists"
 fi
 
 if declare -F run_step >/dev/null; then
@@ -740,7 +861,16 @@ assert_file_contains "installer disables SELinux in persistent config" "$install
 assert_file_contains "installer disables SELinux in every RHEL kernel entry" "$installer" 'grubby[[:space:]]+--update-kernel[[:space:]]+ALL[[:space:]]+--args[[:space:]]+selinux=0'
 assert_file_contains "RHEL ISO installation imports the OS-provided vendor key" "$installer" 'rpm[[:space:]]+--import[[:space:]]+"\$key_file"'
 assert_file_contains "RHEL ISO installation distinguishes absent packages with repoquery" "$installer" 'repoquery[[:space:]]+--available'
+assert_file_contains "unmounted optical media is detected with blkid" "$installer" 'blkid[[:space:]]+-t[[:space:]]+TYPE=iso9660'
+assert_file_contains "default optical-device discovery includes /dev/sr0" "$installer" 'devices=\(/dev/sr0[[:space:]]+/dev/cdrom'
+assert_file_contains "automatically discovered optical media is mounted read-only" "$installer" 'mount[[:space:]]+-o[[:space:]]+ro,nosuid,nodev,noexec'
+assert_file_not_contains "optical-media discovery never starts network filesystems" "$installer" 'mount[[:space:]]+-t[[:space:]]+(nfs|nfs4|cifs)'
 assert_file_not_contains "RHEL ISO installation never disables GPG verification" "$installer" 'gpgcheck=0|nogpgcheck'
+assert_file_not_contains "unused netstat is not selected as an install dependency" "$installer" 'optional_commands=.*netstat'
+assert_file_not_contains "unused sar is not selected as an install dependency" "$installer" 'optional_commands=.*sar'
+assert_file_not_contains "unused lsof is not selected as an install dependency" "$installer" 'optional_commands=.*lsof'
+assert_file_contains "mongosh receives an executable runtime preflight" "$installer" 'probe_packaged_binary[[:space:]]+"mongosh"'
+assert_file_contains "database tools receive an executable runtime preflight" "$installer" 'probe_packaged_binary[[:space:]]+"MongoDB Database Tools"'
 assert_file_not_contains "top-level output is not piped through tee" "$installer" 'main[[:space:]]+"\$@".*tee'
 assert_file_not_contains "installer avoids speculative TCP and dirty-page tuning" "$installer" 'vm\.dirty_ratio|vm\.dirty_expire_centisecs|tcp_tw_reuse|tcp_fin_timeout|netdev_max_backlog'
 assert_file_contains "systemd file limits are resource-derived" "$installer" 'LimitNOFILE=\$\{mongo_nofile_limit\}'
@@ -750,7 +880,9 @@ assert_file_contains "remote nodes are deployed by background workers" "$install
 assert_file_contains "signal cleanup stops active remote deployment workers" "$installer" 'MONGO_REMOTE_DEPLOY_PIDS'
 assert_file_contains "remote deployment workers have tracked process groups" "$installer" 'MONGO_REMOTE_DEPLOY_PGIDS'
 assert_file_contains "progress panel uses absolute top-row rendering" "$installer" "printf '\\\\033\\[%d;1H"
-assert_file_contains "progress cleanup restores the full scroll region" "$installer" "printf '\\\\033\\[r'"
+assert_file_contains "progress cleanup restores the full scroll region" "$installer" "progress_control_printf '\\\\033\\[r'"
+assert_file_contains "trap-time terminal restoration bypasses step redirection" "$installer" 'printf[[:space:]]+"\$@"[[:space:]]+2>/dev/null[[:space:]]+>[[:space:]]+/dev/tty'
+assert_file_contains "parameter and topology validation is a logged progress step" "$installer" 'execute_and_log[[:space:]]+"验证参数与拓扑"[[:space:]]+validate_and_finalize_parameters'
 assert_file_not_contains "DNF and YUM calls use the bounded runner" "$installer" '^[[:space:]]*(dnf|yum)[[:space:]]'
 assert_file_contains "same-version binary transfer uses application fingerprint" "$installer" '应用指纹一致，跳过二进制传输与解压'
 assert_file_contains "one application archive is reused by parallel workers" "$installer" '供 .* 个远程节点复用'

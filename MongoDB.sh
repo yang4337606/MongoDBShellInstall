@@ -4,7 +4,7 @@
 # 创建时间   :   2026-04-24 00:00:00
 # 描述      :   MongoDB 一键安装脚本（单机/副本集 双模式）
 # 路径      :   /soft/MongoDBShellInstall
-# 版本      :   2.0.3
+# 版本      :   2.0.4
 # 借鉴      :   KafkaShellInstall
 # 兼容      :   RHEL/CentOS/Rocky/Alma 7-9, Debian 10-13, Ubuntu 18.04-24.04,
 #               openSUSE/SLES 12-15, Arch Linux, Fedora, Amazon Linux 2/2023
@@ -35,6 +35,24 @@ PROGRESS_TERMINAL_ACTIVE=0
 PROGRESS_TERMINAL_ROWS=0
 MONGO_CLEANUP_RUNNING=0
 mongo_ssh_control_dir=""
+MONGO_AUTO_ISO_MOUNTPOINT=""
+
+# 进度界面运行期间，步骤函数的 stdout/stderr 会被重定向到临时日志。
+# 终端恢复序列必须直接写入控制终端，否则函数内 exit 或信号 trap 会把
+# 恢复序列写进临时文件，造成物理光标持续隐藏、滚动区域无法复原。
+progress_control_printf() {
+  if [[ "${MONGO_PROGRESS_MODE:-plain}" == "ansi" && -c /dev/tty ]]; then
+    printf "$@" 2>/dev/null > /dev/tty && return 0
+  fi
+  printf "$@"
+}
+
+progress_signal_printf() {
+  if [[ "${MONGO_PROGRESS_MODE:-plain}" == "ansi" && -c /dev/tty ]]; then
+    printf "$@" 2>/dev/null > /dev/tty && return 0
+  fi
+  printf "$@" >&2
+}
 
 process_group_has_live_members() {
   local process_group="${1:-}"
@@ -76,11 +94,11 @@ cleanup_on_exit() {
     _ACTIVE_SPINNER_PID=""
   fi
   if (( PROGRESS_TERMINAL_ACTIVE )); then
-    printf '\033[r' 2>/dev/null
+    progress_control_printf '\033[r' 2>/dev/null
     PROGRESS_TERMINAL_ACTIVE=0
   fi
   if (( PROGRESS_CURSOR_HIDDEN )); then
-    printf '\033[?25h' 2>/dev/null
+    progress_control_printf '\033[?25h' 2>/dev/null
     PROGRESS_CURSOR_HIDDEN=0
   fi
 
@@ -111,6 +129,11 @@ cleanup_on_exit() {
   done
   MONGO_REMOTE_DEPLOY_PIDS=()
   MONGO_REMOTE_DEPLOY_PGIDS=()
+  if [[ "$MONGO_AUTO_ISO_MOUNTPOINT" == /run/mongodb-installer-os-iso.* ]]; then
+    umount "$MONGO_AUTO_ISO_MOUNTPOINT" >/dev/null 2>&1 || true
+    rmdir "$MONGO_AUTO_ISO_MOUNTPOINT" >/dev/null 2>&1 || true
+    MONGO_AUTO_ISO_MOUNTPOINT=""
+  fi
   if [[ -n "$mongo_ssh_control_dir" && -d "$mongo_ssh_control_dir" && ! -L "$mongo_ssh_control_dir" ]]; then
     for control_socket in "$mongo_ssh_control_dir"/*; do
       [[ -S "$control_socket" ]] || continue
@@ -132,7 +155,7 @@ cleanup_on_exit() {
 handle_signal() {
   local signal_name="$1" exit_code="$2"
   cleanup_on_exit "$exit_code"
-  printf '\n安装已被信号 %s 中断\n详细日志：%s\n' "$signal_name" "$Mongoinstalllog" >&2
+  progress_signal_printf '\n安装已被信号 %s 中断\n详细日志：%s\n' "$signal_name" "$Mongoinstalllog"
   trap - EXIT
   exit "$exit_code"
 }
@@ -181,7 +204,7 @@ run_package_manager() {
 #==============================================================#
 #                         全局变量定义                         #
 #==============================================================#
-MONGO_INSTALL_VERSION="2.0.3"
+MONGO_INSTALL_VERSION="2.0.4"
 
 software_dir=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 script_name=$(basename "${BASH_SOURCE[0]}")
@@ -313,6 +336,8 @@ mongo_major_ver=0
 mongo_minor_ver=0
 mongo_patch_ver=0
 selected_mongo_tarball=""
+selected_mongosh_tarball=""
+selected_tools_tarball=""
 mongo_package_choice=""
 
 # OS 依赖离线来源。默认补充包目录按 OS 主版本和架构隔离，避免跨版本混装。
@@ -320,6 +345,7 @@ os_packages_archive="${software_dir}/mongdb-offline-rpm.tar.gz"
 os_packages_root="${software_dir}/mongdb-offline-rpm"
 os_packages_dir=""
 os_iso_root=""
+DEPENDENCY_SOURCES_PREPARED=0
 
 # WiredTiger 缓存大小 (自动计算，单位 GB)
 wt_cache_size_gb=0
@@ -575,11 +601,11 @@ progress_terminal_prepare() {
 
 progress_terminal_restore() {
   if (( PROGRESS_TERMINAL_ACTIVE )); then
-    printf '\033[r'
+    progress_control_printf '\033[r'
     PROGRESS_TERMINAL_ACTIVE=0
   fi
   if (( PROGRESS_CURSOR_HIDDEN )); then
-    printf '\033[?25h'
+    progress_control_printf '\033[?25h'
     PROGRESS_CURSOR_HIDDEN=0
   fi
 }
@@ -1550,6 +1576,10 @@ function validate_mongo_platform_compatibility() {
     return 1
   fi
   probe_root=$(find "$probe_dir" -mindepth 1 -maxdepth 1 -type d -name 'mongodb-*' -print -quit)
+  [[ -n "$probe_root" ]] || {
+    echo "错误: 安装包内缺少 mongodb-* 顶层目录" >&2
+    return 1
+  }
   probe_binary="${probe_root}/bin/mongod"
   [[ -x "$probe_binary" ]] || {
     echo "错误: 安装包内缺少可执行的 bin/mongod" >&2
@@ -1566,7 +1596,43 @@ function validate_mongo_platform_compatibility() {
     return 1
   fi
   rm -rf -- "$probe_dir"
+
+  if [[ -n "$selected_mongosh_tarball" ]]; then
+    probe_packaged_binary "mongosh" "$selected_mongosh_tarball" 'mongosh-*' 'bin/mongosh' || return $?
+  fi
+  if [[ -n "$selected_tools_tarball" ]]; then
+    probe_packaged_binary "MongoDB Database Tools" "$selected_tools_tarball" \
+      'mongodb-database-tools-*' 'bin/mongodump' || return $?
+  fi
   echo "兼容性通过: ${os_distro}-${os_version_id}/${os_arch} × MongoDB ${mongo_major_ver}.${mongo_minor_ver}.${mongo_patch_ver}"
+}
+
+function probe_packaged_binary() {
+  local label="$1" archive="$2" root_pattern="$3" binary_relative="$4"
+  local probe_dir probe_root probe_binary probe_output probe_status=0
+  probe_dir=$(mktemp -d /tmp/mongo_install.XXXXXX) || return 1
+  MONGO_INSTALL_TMPDIRS+=("$probe_dir")
+  if ! tar xzf "$archive" -C "$probe_dir"; then
+    printf '错误: %s 安装包无法解压: %s\n' "$label" "$(basename "$archive")" >&2
+    return 1
+  fi
+  probe_root=$(find "$probe_dir" -mindepth 1 -maxdepth 1 -type d -name "$root_pattern" -print -quit)
+  [[ -n "$probe_root" ]] || {
+    printf '错误: %s 安装包缺少预期顶层目录 %s\n' "$label" "$root_pattern" >&2
+    return 1
+  }
+  probe_binary="${probe_root}/${binary_relative}"
+  [[ -x "$probe_binary" ]] || {
+    printf '错误: %s 安装包缺少可执行文件 %s\n' "$label" "$binary_relative" >&2
+    return 1
+  }
+  probe_output=$("$probe_binary" --version 2>&1) || probe_status=$?
+  if (( probe_status != 0 )); then
+    printf '错误: %s 无法在当前系统执行 (exit=%d):\n%s\n' "$label" "$probe_status" "$probe_output" >&2
+    return "$probe_status"
+  fi
+  rm -rf -- "$probe_dir"
+  printf '%s 运行兼容性通过: %s\n' "$label" "$(basename "$archive")"
 }
 #==============================================================#
 #                   检查安装包                                 #
@@ -1587,11 +1653,15 @@ function check_packages() {
   echo "MongoDB 安装包: $(basename "$mongo_tarball")"
 
   # 检查 mongosh 安装包 (可选, 支持多种包名格式)
-  local mongosh_tarball
-  mongosh_tarball=$(ls -1 "${software_dir}"/mongosh-*.tgz "${software_dir}"/mongosh-*.tar.gz 2>/dev/null | head -n1)
+  local mongosh_tarball="${selected_mongosh_tarball:-}"
+  if [[ -z "$mongosh_tarball" || ! -f "$mongosh_tarball" ]]; then
+    mongosh_tarball=$(ls -1 "${software_dir}"/mongosh-*.tgz "${software_dir}"/mongosh-*.tar.gz 2>/dev/null | head -n1)
+  fi
   if [[ -n "$mongosh_tarball" ]]; then
+    selected_mongosh_tarball="$mongosh_tarball"
     echo "mongosh 安装包: $(basename "$mongosh_tarball")"
   else
+    selected_mongosh_tarball=""
     if (( mongo_major_ver >= 6 )); then
       echo "错误: MongoDB ${mongo_major_ver}.${mongo_minor_ver} 安装与验证需要独立的 mongosh 安装包" >&2
       echo "请下载后放入 ${software_dir}: https://www.mongodb.com/try/download/shell" >&2
@@ -1601,11 +1671,15 @@ function check_packages() {
   fi
 
   # 检查 MongoDB Database Tools 安装包 (可选)
-  local tools_tarball
-  tools_tarball=$(ls -1 "${software_dir}"/mongodb-database-tools-*.tgz "${software_dir}"/mongodb-database-tools-*.tar.gz 2>/dev/null | head -n1)
+  local tools_tarball="${selected_tools_tarball:-}"
+  if [[ -z "$tools_tarball" || ! -f "$tools_tarball" ]]; then
+    tools_tarball=$(ls -1 "${software_dir}"/mongodb-database-tools-*.tgz "${software_dir}"/mongodb-database-tools-*.tar.gz 2>/dev/null | head -n1)
+  fi
   if [[ -n "$tools_tarball" ]]; then
+    selected_tools_tarball="$tools_tarball"
     echo "Database Tools 安装包: $(basename "$tools_tarball")"
   else
+    selected_tools_tarball=""
     echo "提示: 未找到 Database Tools 安装包 (mongodump/mongorestore 等)"
     echo "      推荐下载: https://www.mongodb.com/try/download/database-tools"
   fi
@@ -1613,6 +1687,117 @@ function check_packages() {
 #==============================================================#
 #                   安装依赖包                                 #
 #==============================================================#
+function is_os_iso_repo_root() {
+  local candidate="${1:-}"
+  [[ -d "$candidate" ]] || return 1
+  case "$os_distro_family" in
+    rhel)
+      [[ -f "$candidate/repodata/repomd.xml" \
+        || -f "$candidate/BaseOS/repodata/repomd.xml" \
+        || -f "$candidate/AppStream/repodata/repomd.xml" ]]
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+function discover_os_iso_root() {
+  [[ -z "$os_iso_root" ]] || return 0
+  [[ "$os_distro_family" == "rhel" ]] || return 3
+
+  local target device resolved mount_dir
+  local -a devices=(/dev/sr0 /dev/cdrom /dev/dvd)
+  local -A seen_devices=()
+
+  # 优先复用已经挂载的 iso9660，避免重复挂载或干扰管理员现有挂载点。
+  if command -v findmnt >/dev/null 2>&1; then
+    while IFS= read -r target; do
+      [[ -n "$target" ]] || continue
+      if is_os_iso_repo_root "$target"; then
+        os_iso_root=$(readlink -f -- "$target") || return 1
+        echo "检测到已挂载 OS ISO: ${os_iso_root}"
+        return 0
+      fi
+    done < <(findmnt -rn -t iso9660 -o TARGET 2>/dev/null)
+  fi
+
+  # 光驱可能已连接但尚未挂载。blkid 仅枚举本机块设备，不触发 NFS/CIFS。
+  if command -v blkid >/dev/null 2>&1; then
+    while IFS= read -r device; do
+      [[ -n "$device" ]] && devices+=("$device")
+    done < <(blkid -t TYPE=iso9660 -o device 2>/dev/null)
+  fi
+  command -v mount >/dev/null 2>&1 || return 3
+
+  for device in "${devices[@]}"; do
+    resolved=$(readlink -f -- "$device" 2>/dev/null || true)
+    [[ -n "$resolved" && -b "$resolved" ]] || continue
+    [[ -z "${seen_devices[$resolved]+present}" ]] || continue
+    seen_devices[$resolved]=1
+    [[ "$(blkid -o value -s TYPE "$resolved" 2>/dev/null)" == "iso9660" ]] || continue
+
+    if command -v findmnt >/dev/null 2>&1; then
+      target=$(findmnt -rn -S "$resolved" -o TARGET 2>/dev/null | head -n1)
+      if [[ -n "$target" ]] && is_os_iso_repo_root "$target"; then
+        os_iso_root=$(readlink -f -- "$target") || return 1
+        echo "检测到已挂载 OS ISO: ${os_iso_root}"
+        return 0
+      fi
+    fi
+
+    mount_dir=$(mktemp -d /run/mongodb-installer-os-iso.XXXXXX 2>/dev/null) || {
+      echo "警告: 无法创建 OS ISO 临时挂载点，跳过设备 ${resolved}" >&2
+      continue
+    }
+    if ! mount -o ro,nosuid,nodev,noexec "$resolved" "$mount_dir" >/dev/null 2>&1; then
+      rmdir "$mount_dir" >/dev/null 2>&1 || true
+      echo "警告: 检测到 iso9660 设备但只读挂载失败: ${resolved}" >&2
+      continue
+    fi
+    if is_os_iso_repo_root "$mount_dir"; then
+      MONGO_AUTO_ISO_MOUNTPOINT="$mount_dir"
+      os_iso_root="$mount_dir"
+      echo "已只读挂载 OS ISO: ${resolved} -> ${mount_dir}"
+      return 0
+    fi
+    umount "$mount_dir" >/dev/null 2>&1 || true
+    rmdir "$mount_dir" >/dev/null 2>&1 || true
+  done
+  return 3
+}
+
+function prepare_dependency_sources() {
+  local source_count=0 bundle_status=0
+  if [[ -n "$os_iso_root" ]]; then
+    echo "使用显式 OS ISO 目录: ${os_iso_root}"
+    ((source_count++))
+  elif discover_os_iso_root; then
+    ((source_count++))
+  else
+    echo "未检测到可用的本机 OS ISO"
+  fi
+
+  if [[ -n "$os_packages_dir" ]]; then
+    echo "使用显式 OS 离线依赖目录: ${os_packages_dir}"
+    ((source_count++))
+  elif [[ -d "$os_packages_root" ]]; then
+    echo "检测到已解压 OS 离线依赖目录: ${os_packages_root}"
+    ((source_count++))
+  elif [[ -f "$os_packages_archive" && ! -L "$os_packages_archive" ]]; then
+    prepare_os_packages_root || bundle_status=$?
+    if (( bundle_status == 0 )); then
+      echo "已准备 OS 离线依赖包: ${os_packages_archive}"
+      ((source_count++))
+    elif (( bundle_status != 3 )); then
+      return "$bundle_status"
+    fi
+  fi
+
+  if (( source_count == 0 )); then
+    echo "未配置本地依赖介质，将在缺少命令时检查系统在线软件源"
+  fi
+  DEPENDENCY_SOURCES_PREPARED=1
+}
+
 function prepare_os_packages_root() {
   local extract_dir entry archive_list archive_verbose
   [[ -d "$os_packages_root" ]] && return 0
@@ -1908,8 +2093,9 @@ EOF
 
 function pkg_install() {
   log_print "安装依赖包"
+  (( DEPENDENCY_SOURCES_PREPARED == 1 )) || prepare_dependency_sources || return $?
   local -a required_commands=(tar awk grep sed find sort sha256sum ss ip ps)
-  local -a optional_commands=(numactl netstat sar lsof logrotate)
+  local -a optional_commands=(logrotate)
   local -a required_packages=() optional_packages=()
   local command_name install_status=0 warning_status=0 repositories_available=1 repo_list_file=""
 
@@ -1951,13 +2137,7 @@ function pkg_install() {
   for command_name in "${optional_commands[@]}"; do
     command -v "$command_name" >/dev/null 2>&1 && continue
     case "$os_distro_family:$command_name" in
-      rhel:numactl) optional_packages+=(numactl) ;;
-      rhel:netstat) optional_packages+=(net-tools) ;;
-      rhel:sar) optional_packages+=(sysstat) ;;
-      rhel:lsof) optional_packages+=(lsof) ;;
       rhel:logrotate) optional_packages+=(logrotate) ;;
-      debian:netstat) optional_packages+=(net-tools) ;;
-      debian:sar) optional_packages+=(sysstat) ;;
       *) optional_packages+=("$command_name") ;;
     esac
   done
@@ -2675,8 +2855,10 @@ function install_mongodb() {
   rm -rf "$mongo_tmpdir"
 
   # 安装 mongosh (如果有单独的安装包)
-  local mongosh_tarball
-  mongosh_tarball=$(ls -1 "${software_dir}"/mongosh-*.tgz "${software_dir}"/mongosh-*.tar.gz 2>/dev/null | head -n1)
+  local mongosh_tarball="${selected_mongosh_tarball:-}"
+  if [[ -z "$mongosh_tarball" || ! -f "$mongosh_tarball" ]]; then
+    mongosh_tarball=$(ls -1 "${software_dir}"/mongosh-*.tgz "${software_dir}"/mongosh-*.tar.gz 2>/dev/null | head -n1)
+  fi
   if [[ -n "$mongosh_tarball" ]]; then
     echo "安装 mongosh: $(basename "$mongosh_tarball")"
     local mongosh_tmpdir
@@ -2700,8 +2882,10 @@ function install_mongodb() {
   fi
 
   # 安装 MongoDB Database Tools (如果有)
-  local tools_tarball
-  tools_tarball=$(ls -1 "${software_dir}"/mongodb-database-tools-*.tgz "${software_dir}"/mongodb-database-tools-*.tar.gz 2>/dev/null | head -n1)
+  local tools_tarball="${selected_tools_tarball:-}"
+  if [[ -z "$tools_tarball" || ! -f "$tools_tarball" ]]; then
+    tools_tarball=$(ls -1 "${software_dir}"/mongodb-database-tools-*.tgz "${software_dir}"/mongodb-database-tools-*.tar.gz 2>/dev/null | head -n1)
+  fi
   if [[ -n "$tools_tarball" ]]; then
     echo "安装 Database Tools: $(basename "$tools_tarball")"
     local tools_tmpdir
@@ -4064,7 +4248,7 @@ RSVCEOF
 
 function deploy_remote_nodes() {
   [[ "$mongo_install_mode" == "replicaset" ]] || return 0
-  local local_ip host endpoint log_file pid worker_pgid index batch_index batch_count=0 failure=0 remote_count=0
+  local local_ip host endpoint log_file pid worker_pgid index batch_index batch_count=0 failure=0 worker_status=0 remote_count=0
   local monitor_mode_was_enabled=0
   local app_pkg local_app_fingerprint expected_version
   local -a remote_hosts=() remote_endpoints=()
@@ -4118,7 +4302,11 @@ function deploy_remote_nodes() {
     if (( batch_count >= mongo_remote_parallelism )); then
       for ((batch_index=0; batch_index<batch_count; batch_index++)); do
         pid=${batch_pids[$batch_index]}
-        wait "$pid" || failure=1
+        wait "$pid"
+        worker_status=$?
+        if (( worker_status != 0 && failure == 0 )); then
+          failure=$worker_status
+        fi
         MONGO_REMOTE_DEPLOY_PIDS[$batch_index]=""
         MONGO_REMOTE_DEPLOY_PGIDS[$batch_index]=""
         printf '%s\n' "--- ${batch_hosts[$batch_index]} (${batch_endpoints[$batch_index]}) ---"
@@ -4127,12 +4315,18 @@ function deploy_remote_nodes() {
       batch_pids=(); batch_logs=(); batch_hosts=(); batch_endpoints=(); batch_count=0
       MONGO_REMOTE_DEPLOY_PIDS=()
       MONGO_REMOTE_DEPLOY_PGIDS=()
+      # 已启动的同批任务全部收敛后立即停止，不再对后续节点执行部署操作。
+      (( failure == 0 )) || break
     fi
   done
 
   for ((batch_index=0; batch_index<batch_count; batch_index++)); do
     pid=${batch_pids[$batch_index]}
-    wait "$pid" || failure=1
+    wait "$pid"
+    worker_status=$?
+    if (( worker_status != 0 && failure == 0 )); then
+      failure=$worker_status
+    fi
     MONGO_REMOTE_DEPLOY_PIDS[$batch_index]=""
     MONGO_REMOTE_DEPLOY_PGIDS[$batch_index]=""
     printf '%s\n' "--- ${batch_hosts[$batch_index]} (${batch_endpoints[$batch_index]}) ---"
@@ -4141,8 +4335,8 @@ function deploy_remote_nodes() {
   MONGO_REMOTE_DEPLOY_PIDS=()
   MONGO_REMOTE_DEPLOY_PGIDS=()
   (( failure == 0 )) || {
-    echo "错误: 至少一个远程节点部署失败" >&2
-    return 1
+    printf '错误: 远程节点部署失败（原始退出码 %d），未启动后续批次\n' "$failure" >&2
+    return "$failure"
   }
   rm -f "$app_pkg"
   echo "远程节点并行部署完成 (${remote_count} 个，并发上限 ${mongo_remote_parallelism})"
@@ -4841,17 +5035,26 @@ function validate_and_finalize_parameters() {
 function calculate_total_steps() {
   local total
   if [[ "$only_conf_os" == "Y" ]]; then
-    printf '9'
+    # 参数/拓扑预检 + 依赖介质检测 + 9 个系统配置步骤。
+    printf '11'
     return
   elif [[ "$mongo_install_mode" == "replicaset" ]]; then
-    if [[ "$mongo_auth_enabled" == "Y" ]]; then total=29; else total=28; fi
+    # 无认证副本集基础步骤；keyFile 仅在实际生成时追加。
+    total=29
+    if [[ "$mongo_auth_enabled" == "Y" ]]; then
+      total=$((total + 1)) # 创建并验证管理员
+      [[ "${mongo_cluster_auth_mode,,}" == "keyfile" ]] && total=$((total + 1))
+    fi
   elif [[ "$mongo_auth_enabled" == "Y" ]]; then
-    total=25
+    total=27
   else
-    total=24
+    total=26
   fi
   [[ "$mongo_tls_enabled" == "Y" ]] && total=$((total + 2))
-  if [[ "$mongo_install_mode" == "replicaset" && -n "$remote_root_pass" && -z "$ssh_identity_file" ]]; then
+  if [[ "$mongo_install_mode" == "replicaset" \
+    && ${#remote_ips_array[@]} -gt 1 \
+    && ( -n "$remote_root_pass" || -n "$remote_root_pass_file" ) \
+    && -z "$ssh_identity_file" ]]; then
     total=$((total + 1))
   fi
   printf '%d' "$total"
@@ -4903,7 +5106,7 @@ MongoDB 一键安装脚本 (单机 + 副本集) v${MONGO_INSTALL_VERSION}
   -br, --backup-days DAYS  备份保留天数 (默认: 7)
   -mv, --mongo-version VER --os-only 时指定版本，以正确配置 THP
   -mp, --mongo-package FILE|VER 多个 Server 包时指定文件名或版本；只有一个时自动选择
-  -oir, --os-iso-root DIR  已挂载的 OS ISO 根目录（优先安装 ISO 内依赖）
+  -oir, --os-iso-root DIR  已挂载的 OS ISO 根目录（未指定时自动检测本机 iso9660 光驱并只读挂载）
   -opd, --os-packages-dir DIR 已解压的 OS 离线依赖目录（高级覆盖）
   -np, --no-progress       禁用 ANSI 动画，输出逐行日志
   -y, --yes                非交互确认安装
@@ -5254,11 +5457,13 @@ function main() {
       replicaset|rs) mongo_install_mode="replicaset" ;;
       *) echo "错误: 无效的安装模式: ${mongo_install_mode}" >&2; return 1 ;;
     esac
-    validate_and_finalize_parameters || return $?
-    begin_install_timer
     progress_init "$(calculate_total_steps)" "$Mongoinstalllog" || return $?
+    progress_set_stage "安装预检"
+    execute_and_log "验证参数与资源配置" validate_and_finalize_parameters || return $?
+    begin_install_timer
     progress_set_stage "系统配置"
     execute_and_log "检查主机名" conf_hostname || return $?
+    execute_and_log "检测依赖安装介质" prepare_dependency_sources || return $?
     execute_and_log "安装系统依赖" pkg_install || return $?
     execute_and_log "关闭防火墙" conf_firewall || return $?
     execute_and_log "关闭 SELinux" conf_selinux || return $?
@@ -5289,14 +5494,16 @@ function main() {
     esac
   fi
 
-  validate_and_finalize_parameters || return $?
+  progress_init "$(calculate_total_steps)" "$Mongoinstalllog" || return $?
+  progress_set_stage "安装预检"
+  execute_and_log "验证参数与拓扑" validate_and_finalize_parameters || return $?
 
   if [[ "$mongo_auth_enabled" != "Y" ]] && ! bind_is_loopback_only "$mongo_bind_ip"; then
     color_printf yellow "高风险警告: MongoDB 未启用认证且监听 ${mongo_bind_ip}，任何网络可达主机都可能读写数据"
   fi
   color_printf yellow "系统安全提示: 安装器将停止并禁用防火墙，同时关闭 SELinux"
 
-  # 在动画接管终端前显示非阻断性拓扑提示。
+  # 动画面板已固定在顶部；拓扑提示输出到下方滚动区域。
   if [[ "$mongo_install_mode" == "replicaset" ]]; then
     local node_count=${#hosts_array[@]}
     (( node_count < 3 )) && color_printf yellow "警告: 副本集建议至少 3 个节点 (当前: ${node_count})"
@@ -5318,7 +5525,6 @@ function main() {
   fi
 
   begin_install_timer
-  progress_init "$(calculate_total_steps)" "$Mongoinstalllog" || return $?
 
   progress_set_stage "安装预检"
   execute_and_log "检测 MongoDB 版本" detect_mongo_version || return $?
@@ -5327,13 +5533,14 @@ function main() {
 
   progress_set_stage "系统配置"
   execute_and_log "检查主机名" conf_hostname || return $?
+  execute_and_log "检测依赖安装介质" prepare_dependency_sources || return $?
   execute_and_log "安装系统依赖" pkg_install || return $?
   if [[ "$mongo_tls_enabled" == "Y" ]]; then
     execute_and_log "验证 TLS/X.509 证书" validate_tls_material || return $?
   fi
   if [[ "$mongo_install_mode" == "replicaset" ]]; then
     progress_set_stage "集群预检"
-    if [[ -n "$remote_root_pass" && -z "$ssh_identity_file" ]]; then
+    if [[ ${#remote_ips_array[@]} -gt 1 && -n "$remote_root_pass" && -z "$ssh_identity_file" ]]; then
       execute_and_log "建立 SSH 公钥信任" bootstrap_ssh_key_trust || return $?
     fi
     execute_and_log "检查 SSH 与成员 DNS" check_cluster_connectivity || return $?
@@ -5359,7 +5566,9 @@ function main() {
 
   progress_set_stage "MongoDB 配置"
   execute_and_log "生成 MongoDB 配置" conf_mongodb || return $?
-  if [[ "$mongo_install_mode" == "replicaset" ]]; then
+  if [[ "$mongo_install_mode" == "replicaset" \
+    && "$mongo_auth_enabled" == "Y" \
+    && "$mongo_cluster_auth_mode" == "keyFile" ]]; then
     execute_and_log "生成副本集 keyFile" generate_keyfile || return $?
   fi
 

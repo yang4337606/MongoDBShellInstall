@@ -310,7 +310,7 @@ body::before{content:'';position:fixed;top:0;left:0;width:100%;height:100%;point
             <input type="text" id="f-mongo-package" placeholder="多包时指定，例如: 8.0.29" oninput="updateCmd()">
           </div>
           <div class="form-group">
-            <label><span class="param">-oir / --os-iso-root</span> 已挂载 OS ISO</label>
+            <label><span class="param">-oir / --os-iso-root</span> OS ISO 挂载目录（可选覆盖自动检测）</label>
             <input type="text" id="f-os-iso-root" placeholder="例如: /mnt/rhel9" oninput="updateCmd()">
           </div>
           <div class="form-group">
@@ -510,7 +510,7 @@ function updateCmd() {
   const mongoPackage = getVal('f-mongo-package');
   if (mongoPackage) lines.push({ flag: '-mp', value: mongoPackage, comment: 'MongoDB Server 安装包/版本' });
   const osIsoRoot = getVal('f-os-iso-root');
-  if (osIsoRoot) lines.push({ flag: '-oir', value: osIsoRoot, comment: '已挂载 OS ISO 根目录' });
+  if (osIsoRoot) lines.push({ flag: '-oir', value: osIsoRoot, comment: '显式 OS ISO 根目录（覆盖自动光驱检测）' });
   const osPackagesDir = getVal('f-os-packages-dir');
   if (osPackagesDir) lines.push({ flag: '-opd', value: osPackagesDir, comment: '已解压 OS 离线依赖目录' });
   if (getVal('f-debug') === 'Y') lines.push({ flag: '-dbg', value: '', comment: '调试模式' });
