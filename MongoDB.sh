@@ -4,7 +4,7 @@
 # 创建时间   :   2026-04-24 00:00:00
 # 描述      :   MongoDB 一键安装脚本（单机/副本集 双模式）
 # 路径      :   /soft/MongoDBShellInstall
-# 版本      :   2.0.4
+# 版本      :   2.0.5
 # 借鉴      :   KafkaShellInstall
 # 兼容      :   RHEL/CentOS/Rocky/Alma 7-9, Debian 10-13, Ubuntu 18.04-24.04,
 #               openSUSE/SLES 12-15, Arch Linux, Fedora, Amazon Linux 2/2023
@@ -29,6 +29,7 @@ MONGO_REMOTE_DEPLOY_PIDS=()
 MONGO_REMOTE_DEPLOY_PGIDS=()
 MONGO_ACTIVE_COMMAND_PID=""
 MONGO_ACTIVE_COMMAND_PGID=""
+MONGO_REMOTE_WORKER=0
 _ACTIVE_SPINNER_PID=""
 PROGRESS_CURSOR_HIDDEN=0
 PROGRESS_TERMINAL_ACTIVE=0
@@ -166,6 +167,12 @@ trap 'handle_signal TERM 143' TERM
 
 run_managed_command() {
   local child_pid child_status=0
+  # 行为测试可用同名 shell 函数替换外部程序；生产路径中的外部命令仍进入
+  # 独立会话，确保 TERM/EXIT 能终止整个进程组。
+  if declare -F "${1:-}" >/dev/null 2>&1; then
+    "$@" </dev/null
+    return $?
+  fi
   if command -v setsid >/dev/null 2>&1; then
     setsid "$@" </dev/null &
     child_pid=$!
@@ -186,6 +193,16 @@ run_managed_command() {
   return "$child_status"
 }
 
+run_remote_transport_command() {
+  # 并行部署 worker 本身已经拥有由父进程跟踪的独立进程组；在 worker
+  # 内再次 setsid 会让 SSH 逃出该组。主流程中的 SSH/SCP 则单独托管。
+  if [[ "${MONGO_REMOTE_WORKER:-0}" == "1" ]]; then
+    "$@" </dev/null
+  else
+    run_managed_command "$@"
+  fi
+}
+
 run_package_manager() {
   local timeout_seconds="${MONGO_PACKAGE_COMMAND_TIMEOUT:-900}" status=0
   [[ "$timeout_seconds" =~ ^[1-9][0-9]*$ ]] || timeout_seconds=900
@@ -204,7 +221,7 @@ run_package_manager() {
 #==============================================================#
 #                         全局变量定义                         #
 #==============================================================#
-MONGO_INSTALL_VERSION="2.0.4"
+MONGO_INSTALL_VERSION="2.0.5"
 
 software_dir=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
 script_name=$(basename "${BASH_SOURCE[0]}")
@@ -346,6 +363,7 @@ os_packages_root="${software_dir}/mongdb-offline-rpm"
 os_packages_dir=""
 os_iso_root=""
 DEPENDENCY_SOURCES_PREPARED=0
+remote_dependency_archive=""
 
 # WiredTiger 缓存大小 (自动计算，单位 GB)
 wt_cache_size_gb=0
@@ -1094,6 +1112,34 @@ function validate_mongo_os_version_matrix() {
   fi
 }
 
+function validate_mongo_host_requirements() {
+  validate_mongo_os_version_matrix || return 1
+
+  case "$os_arch" in
+    x86_64|aarch64|ppc64le|s390x) ;;
+    *)
+      echo "错误: 不支持的 CPU 架构: ${os_arch}" >&2
+      return 1
+      ;;
+  esac
+
+  if [[ "$os_arch" == "x86_64" && "$mongo_major_ver" -ge 5 ]]; then
+    grep -qm1 -w avx /proc/cpuinfo 2>/dev/null || {
+      echo "错误: MongoDB 5.0+ 的 x86_64 官方二进制要求 CPU 支持 AVX" >&2
+      return 1
+    }
+  fi
+}
+
+function validate_os_only_mongo_compatibility() {
+  if (( mongo_major_ver <= 0 )); then
+    echo "警告: --os-only 未指定 --mongo-version，仅执行通用 OS 配置，跳过 MongoDB 版本兼容性判断"
+    return 3
+  fi
+  validate_mongo_host_requirements || return 1
+  echo "OS 配置目标兼容性通过: ${os_distro}-${os_version_id}/${os_arch} × MongoDB ${mongo_major_ver}.${mongo_minor_ver}.${mongo_patch_ver}"
+}
+
 # 配置能力统一按 MongoDB 版本判断。某个版本移除参数时，只跳过该参数的
 # 对应版本区间，绝不为兼容高版本而从所有版本配置中全局删除。
 function mongo_supports_config_option() {
@@ -1537,22 +1583,7 @@ function validate_mongo_platform_compatibility() {
   }
   package_name=$(basename "$mongo_tarball")
 
-  validate_mongo_os_version_matrix || return 1
-
-  case "$os_arch" in
-    x86_64|aarch64|ppc64le|s390x) ;;
-    *)
-      echo "错误: 不支持的 CPU 架构: ${os_arch}" >&2
-      return 1
-      ;;
-  esac
-
-  if [[ "$os_arch" == "x86_64" && "$mongo_major_ver" -ge 5 ]]; then
-    grep -qm1 -w avx /proc/cpuinfo 2>/dev/null || {
-      echo "错误: MongoDB 5.0+ 的 x86_64 官方二进制要求 CPU 支持 AVX" >&2
-      return 1
-    }
-  fi
+  validate_mongo_host_requirements || return 1
 
   # 包文件名携带平台时，先阻止明显的跨发行版/跨架构误装。
   if [[ "$package_name" == *-aarch64-* && "$os_arch" != "aarch64" ]] \
@@ -1571,7 +1602,7 @@ function validate_mongo_platform_compatibility() {
   # 最终以目标机真实执行结果为准，可直接捕获 glibc/OpenSSL/CPU 指令不兼容。
   probe_dir=$(mktemp -d /tmp/mongo_install.XXXXXX) || return 1
   MONGO_INSTALL_TMPDIRS+=("$probe_dir")
-  if ! tar xzf "$mongo_tarball" -C "$probe_dir"; then
+  if ! run_managed_command tar xzf "$mongo_tarball" -C "$probe_dir"; then
     echo "错误: MongoDB 安装包无法解压: ${package_name}" >&2
     return 1
   fi
@@ -1612,7 +1643,7 @@ function probe_packaged_binary() {
   local probe_dir probe_root probe_binary probe_output probe_status=0
   probe_dir=$(mktemp -d /tmp/mongo_install.XXXXXX) || return 1
   MONGO_INSTALL_TMPDIRS+=("$probe_dir")
-  if ! tar xzf "$archive" -C "$probe_dir"; then
+  if ! run_managed_command tar xzf "$archive" -C "$probe_dir"; then
     printf '错误: %s 安装包无法解压: %s\n' "$label" "$(basename "$archive")" >&2
     return 1
   fi
@@ -1807,7 +1838,7 @@ function prepare_os_packages_root() {
   MONGO_INSTALL_TMPFILES+=("$archive_list")
   MONGO_INSTALL_TMPFILES+=("$archive_verbose")
   # 单次详细列表同时验证条目类型并取得路径；验证通过后才进行第二次读取解压。
-  LC_ALL=C tar --numeric-owner --quoting-style=escape -tvzf "$os_packages_archive" > "$archive_verbose" || {
+  LC_ALL=C run_managed_command tar --numeric-owner --quoting-style=escape -tvzf "$os_packages_archive" > "$archive_verbose" || {
     echo "错误: 无法读取 mongdb-offline-rpm.tar.gz" >&2
     return 1
   }
@@ -1835,7 +1866,7 @@ function prepare_os_packages_root() {
   done < "$archive_list"
   extract_dir=$(mktemp -d /tmp/mongo-os-packages.XXXXXX) || return 1
   MONGO_INSTALL_TMPDIRS+=("$extract_dir")
-  tar --no-same-owner --no-same-permissions -xzf "$os_packages_archive" -C "$extract_dir" || return 1
+  run_managed_command tar --no-same-owner --no-same-permissions -xzf "$os_packages_archive" -C "$extract_dir" || return 1
   [[ -d "${extract_dir}/mongdb-offline-rpm" ]] || {
     echo "错误: mongdb-offline-rpm.tar.gz 缺少顶层 mongdb-offline-rpm/ 目录" >&2
     return 1
@@ -1889,8 +1920,8 @@ function validate_os_package_bundle() {
 }
 
 function install_os_offline_bundle() {
-  local bundle_dir package_file package_name requested_name selected
-  local -a requested_packages=("$@") package_files=() selected_package_files=()
+  local bundle_dir package_file package_name requested_name requested_match=0
+  local -a requested_packages=("$@") package_files=()
   bundle_dir=$(resolve_os_packages_dir) || return $?
   validate_os_package_bundle "$bundle_dir" || return 1
   case "$os_distro_family" in
@@ -1911,19 +1942,19 @@ function install_os_offline_bundle() {
   if (( ${#requested_packages[@]} > 0 )); then
     for package_file in "${package_files[@]}"; do
       package_name=$(rpm -qp --qf '%{NAME}' "$package_file" 2>/dev/null) || return 1
-      selected=0
       for requested_name in "${requested_packages[@]}"; do
         if [[ "$package_name" == "$requested_name" ]]; then
-          selected=1
+          requested_match=1
           break
         fi
       done
-      (( selected == 0 )) || selected_package_files+=("$package_file")
     done
-    package_files=("${selected_package_files[@]}")
-    (( ${#package_files[@]} > 0 )) || return 3
+    (( requested_match == 1 )) || return 3
   fi
-  echo "使用 OS 离线补充包: ${bundle_dir} (${#package_files[@]} 个)"
+  # 构建工具通过 dnf download --resolve --alldeps 生成完整闭包。只要归档
+  # 命中了本轮缺失的顶层包，就必须把同平台目录内的全部 RPM 一并交给
+  # 离线包管理器；DNF/YUM 不会自动扫描相邻文件来补齐传递依赖。
+  echo "使用 OS 离线补充包完整依赖闭包: ${bundle_dir} (${#package_files[@]} 个)"
   case "$os_distro_family" in
     rhel)
       import_system_rpm_signing_key || return 1
@@ -1938,12 +1969,12 @@ function install_os_offline_bundle() {
       elif command -v yum >/dev/null 2>&1; then
         run_package_manager yum --disablerepo='*' localinstall -y -q "${package_files[@]}"
       else
-        rpm -Uvh --replacepkgs "${package_files[@]}"
+        run_package_manager rpm -Uvh --replacepkgs "${package_files[@]}"
       fi
       ;;
-    debian) dpkg -i "${package_files[@]}" ;;
-    suse) zypper --no-refresh --non-interactive install "${package_files[@]}" ;;
-    arch) pacman -U --noconfirm "${package_files[@]}" ;;
+    debian) run_package_manager dpkg -i "${package_files[@]}" ;;
+    suse) run_package_manager zypper --no-refresh --non-interactive install "${package_files[@]}" ;;
+    arch) run_package_manager pacman -U --noconfirm "${package_files[@]}" ;;
     *) return 3 ;;
   esac
 }
@@ -2207,22 +2238,22 @@ function pkg_install() {
     debian)
       if (( ${#required_packages[@]} > 0 || ${#optional_packages[@]} > 0 )); then
         export DEBIAN_FRONTEND=noninteractive
-        apt-get update -qq || install_status=$?
+        run_package_manager apt-get update -qq || install_status=$?
         if (( install_status == 0 && ${#required_packages[@]} > 0 )); then
-          apt-get install -y -qq "${required_packages[@]}" || install_status=$?
+          run_package_manager apt-get install -y -qq "${required_packages[@]}" || install_status=$?
         fi
         if (( install_status == 0 && ${#optional_packages[@]} > 0 )); then
-          apt-get install -y -qq "${optional_packages[@]}" || warning_status=3
+          run_package_manager apt-get install -y -qq "${optional_packages[@]}" || warning_status=3
         fi
       fi
       ;;
     suse)
-      (( ${#required_packages[@]} == 0 )) || zypper --non-interactive install "${required_packages[@]}" || install_status=$?
-      (( ${#optional_packages[@]} == 0 )) || zypper --non-interactive install "${optional_packages[@]}" || warning_status=3
+      (( ${#required_packages[@]} == 0 )) || run_package_manager zypper --non-interactive install "${required_packages[@]}" || install_status=$?
+      (( ${#optional_packages[@]} == 0 )) || run_package_manager zypper --non-interactive install "${optional_packages[@]}" || warning_status=3
       ;;
     arch)
-      (( ${#required_packages[@]} == 0 )) || pacman -Sy --noconfirm --needed "${required_packages[@]}" || install_status=$?
-      (( ${#optional_packages[@]} == 0 )) || pacman -Sy --noconfirm --needed "${optional_packages[@]}" || warning_status=3
+      (( ${#required_packages[@]} == 0 )) || run_package_manager pacman -Sy --noconfirm --needed "${required_packages[@]}" || install_status=$?
+      (( ${#optional_packages[@]} == 0 )) || run_package_manager pacman -Sy --noconfirm --needed "${optional_packages[@]}" || warning_status=3
       ;;
     *)
       (( ${#required_packages[@]} == 0 )) || {
@@ -2813,7 +2844,7 @@ function install_mongodb() {
   local mongo_tmpdir
   mongo_tmpdir=$(mktemp -d /tmp/mongo_install.XXXXXX) || return 1
   MONGO_INSTALL_TMPDIRS+=("$mongo_tmpdir")
-  if ! tar xzf "$mongo_tarball" -C "$mongo_tmpdir"; then
+  if ! run_managed_command tar xzf "$mongo_tarball" -C "$mongo_tmpdir"; then
     rm -rf "$mongo_tmpdir"
     color_printf red "错误: MongoDB 安装包解压失败"
     return 1
@@ -2847,7 +2878,7 @@ function install_mongodb() {
       rmdir "${env_app_dir}" || return 1
     fi
   fi
-  if ! cp -a "$mongo_src_dir" "${env_app_dir}"; then
+  if ! run_managed_command cp -a "$mongo_src_dir" "${env_app_dir}"; then
     rm -rf -- "$mongo_tmpdir"
     echo "错误: 复制 MongoDB 程序文件失败" >&2
     return 1
@@ -2864,7 +2895,7 @@ function install_mongodb() {
     local mongosh_tmpdir
     mongosh_tmpdir=$(mktemp -d /tmp/mongosh_install.XXXXXX) || return 1
     MONGO_INSTALL_TMPDIRS+=("$mongosh_tmpdir")
-    if ! tar xzf "$mongosh_tarball" -C "$mongosh_tmpdir" 2>/dev/null; then
+    if ! run_managed_command tar xzf "$mongosh_tarball" -C "$mongosh_tmpdir" 2>/dev/null; then
       rm -rf -- "$mongosh_tmpdir"
       echo "错误: mongosh 安装包解压失败" >&2
       return 1
@@ -2876,7 +2907,7 @@ function install_mongodb() {
       echo "错误: mongosh 安装包中未找到可执行文件" >&2
       return 1
     fi
-    cp -f "${mongosh_src_dir}/bin/mongosh" "${env_app_dir}/bin/" || return 1
+    run_managed_command cp -f "${mongosh_src_dir}/bin/mongosh" "${env_app_dir}/bin/" || return 1
     echo "mongosh 安装完成"
     rm -rf "$mongosh_tmpdir"
   fi
@@ -2891,7 +2922,7 @@ function install_mongodb() {
     local tools_tmpdir
     tools_tmpdir=$(mktemp -d /tmp/mongotools_install.XXXXXX) || return 1
     MONGO_INSTALL_TMPDIRS+=("$tools_tmpdir")
-    if ! tar xzf "$tools_tarball" -C "$tools_tmpdir" 2>/dev/null; then
+    if ! run_managed_command tar xzf "$tools_tarball" -C "$tools_tmpdir" 2>/dev/null; then
       rm -rf -- "$tools_tmpdir"
       echo "错误: Database Tools 安装包解压失败" >&2
       return 1
@@ -2903,7 +2934,7 @@ function install_mongodb() {
       echo "错误: Database Tools 安装包中未找到 mongodump" >&2
       return 1
     fi
-    cp -f "${tools_src_dir}"/bin/* "${env_app_dir}/bin/" 2>/dev/null || return 1
+    run_managed_command cp -f "${tools_src_dir}"/bin/* "${env_app_dir}/bin/" 2>/dev/null || return 1
     echo "Database Tools 安装完成"
     rm -rf "$tools_tmpdir"
   fi
@@ -3351,13 +3382,23 @@ else
   exit_code=1
 fi
 
-# 压缩备份
-cd "$BACKUP_DIR" && tar czf "${backup_date}.tar.gz" "${backup_date}" && rm -rf "${backup_date}"
-if [[ $? -ne 0 ]]; then
-  log "错误: 备份压缩失败"
-  exit_code=1
+# 只有逻辑备份完整成功时才发布正式归档。失败目录保留原位，避免部分
+# dump 被误认为可恢复备份；压缩阶段也先写 .part，再原子改名。
+archive_tmp="${BACKUP_DIR}/${backup_date}.tar.gz.part"
+archive_final="${BACKUP_DIR}/${backup_date}.tar.gz"
+if (( exit_code == 0 )); then
+  rm -f -- "$archive_tmp"
+  if tar -C "$BACKUP_DIR" -czf "$archive_tmp" "$backup_date" \
+    && mv -f -- "$archive_tmp" "$archive_final"; then
+    rm -rf -- "$backup_path"
+    log "备份压缩完成: ${archive_final}"
+  else
+    rm -f -- "$archive_tmp"
+    log "错误: 备份压缩失败，未发布正式归档；工作目录保留: ${backup_path}"
+    exit_code=1
+  fi
 else
-  log "备份压缩完成: ${BACKUP_DIR}/${backup_date}.tar.gz"
+  log "错误: 逻辑备份不完整，未发布正式归档；工作目录保留: ${backup_path}"
 fi
 
 # 清理过期备份
@@ -3721,12 +3762,26 @@ ASKPASSEOF
 function run_with_ssh_password() {
   ensure_ssh_askpass_helper || return 1
   [[ -n "$remote_root_pass" ]] || return 1
-  run_managed_command env \
-    DISPLAY=mongodb-install:0 \
-    SSH_ASKPASS="${mongo_ssh_askpass_dir}/askpass" \
-    SSH_ASKPASS_REQUIRE=force \
-    MONGO_SSH_ASKPASS_SECRET="$remote_root_pass" \
-    "$@"
+  local status=0
+  local display_was_set="${DISPLAY+x}" old_display="${DISPLAY-}"
+  local askpass_was_set="${SSH_ASKPASS+x}" old_askpass="${SSH_ASKPASS-}"
+  local require_was_set="${SSH_ASKPASS_REQUIRE+x}" old_require="${SSH_ASKPASS_REQUIRE-}"
+  local secret_was_set="${MONGO_SSH_ASKPASS_SECRET+x}" old_secret="${MONGO_SSH_ASKPASS_SECRET-}"
+
+  # 不使用 `env NAME=secret command`，避免 root 密码短暂出现在 env/setsid
+  # 的 argv 中。密码仅作为导出的环境变量提供给 0700 的 askpass helper。
+  DISPLAY=mongodb-install:0
+  SSH_ASKPASS="${mongo_ssh_askpass_dir}/askpass"
+  SSH_ASKPASS_REQUIRE=force
+  MONGO_SSH_ASKPASS_SECRET="$remote_root_pass"
+  export DISPLAY SSH_ASKPASS SSH_ASKPASS_REQUIRE MONGO_SSH_ASKPASS_SECRET
+  run_remote_transport_command "$@" || status=$?
+
+  if [[ "$display_was_set" == x ]]; then export DISPLAY="$old_display"; else unset DISPLAY; fi
+  if [[ "$askpass_was_set" == x ]]; then export SSH_ASKPASS="$old_askpass"; else unset SSH_ASKPASS; fi
+  if [[ "$require_was_set" == x ]]; then export SSH_ASKPASS_REQUIRE="$old_require"; else unset SSH_ASKPASS_REQUIRE; fi
+  if [[ "$secret_was_set" == x ]]; then export MONGO_SSH_ASKPASS_SECRET="$old_secret"; else unset MONGO_SSH_ASKPASS_SECRET; fi
+  return "$status"
 }
 
 function password_remote_exec() {
@@ -3746,7 +3801,7 @@ function password_remote_exec() {
 
 function key_remote_exec() {
   local host="$1" key_file="$2"; shift 2
-  ssh -T \
+  run_remote_transport_command ssh -T \
     -o StrictHostKeyChecking=yes \
     -o "UserKnownHostsFile=${ssh_known_hosts_file}" \
     -o ConnectTimeout=10 \
@@ -3860,7 +3915,7 @@ function remote_exec() {
   if [[ -n "$ssh_identity_file" ]]; then
     ssh_args+=(-o IdentitiesOnly=yes -i "$ssh_identity_file")
     ssh_args+=(-o BatchMode=yes)
-    ssh "${ssh_args[@]}" "root@${host}" "$@"
+    run_remote_transport_command ssh "${ssh_args[@]}" "root@${host}" "$@"
   elif [[ -n "$remote_root_pass" ]]; then
     run_with_ssh_password ssh "${ssh_args[@]}" \
       -o PubkeyAuthentication=no \
@@ -3869,7 +3924,7 @@ function remote_exec() {
       "root@${host}" "$@"
   else
     ssh_args+=(-o BatchMode=yes)
-    ssh "${ssh_args[@]}" "root@${host}" "$@"
+    run_remote_transport_command ssh "${ssh_args[@]}" "root@${host}" "$@"
   fi
 }
 
@@ -3888,7 +3943,7 @@ function remote_copy() {
   if [[ -n "$ssh_identity_file" ]]; then
     scp_args+=(-o IdentitiesOnly=yes -i "$ssh_identity_file")
     scp_args+=(-o BatchMode=yes)
-    scp "${scp_args[@]}" "$src" "root@${host}:${dest}"
+    run_remote_transport_command scp "${scp_args[@]}" "$src" "root@${host}:${dest}"
   elif [[ -n "$remote_root_pass" ]]; then
     run_with_ssh_password scp "${scp_args[@]}" \
       -o PubkeyAuthentication=no \
@@ -3897,7 +3952,7 @@ function remote_copy() {
       "$src" "root@${host}:${dest}"
   else
     scp_args+=(-o BatchMode=yes)
-    scp "${scp_args[@]}" "$src" "root@${host}:${dest}"
+    run_remote_transport_command scp "${scp_args[@]}" "$src" "root@${host}:${dest}"
   fi
 }
 
@@ -4017,6 +4072,61 @@ function check_cluster_connectivity() {
   fi
 }
 
+function validate_remote_cluster_platform() {
+  local host="$1" remote_output remote_line remote_distro remote_major remote_arch
+  remote_output=$(remote_exec "$host" '
+    set -e
+    test -r /etc/os-release
+    . /etc/os-release
+    _major=${VERSION_ID%%.*}
+    _arch=$(uname -m)
+    printf "MONGO_REMOTE_PLATFORM=%s|%s|%s\n" "${ID:-unknown}" "${_major:-0}" "${_arch:-unknown}"
+  ' 2>&1) || {
+    printf '错误: [%s] 无法读取远端 OS/CPU 信息:\n%s\n' "$host" "$remote_output" >&2
+    return 1
+  }
+  remote_line=$(printf '%s\n' "$remote_output" | sed -n 's/^MONGO_REMOTE_PLATFORM=//p' | tail -n1)
+  IFS='|' read -r remote_distro remote_major remote_arch <<< "$remote_line"
+  [[ "$remote_distro" =~ ^[A-Za-z0-9._-]+$ \
+    && "$remote_major" =~ ^[0-9]+$ \
+    && "$remote_arch" =~ ^[A-Za-z0-9._-]+$ ]] || {
+    printf '错误: [%s] 远端平台信息格式异常: %s\n' "$host" "$remote_line" >&2
+    return 1
+  }
+  if [[ "$remote_distro" != "$os_distro" || "$remote_major" != "$os_version" || "$remote_arch" != "$os_arch" ]]; then
+    printf '错误: [%s] 副本集节点平台必须一致: coordinator=%s/%s/%s, remote=%s/%s/%s\n' \
+      "$host" "$os_distro" "$os_version" "$os_arch" \
+      "$remote_distro" "$remote_major" "$remote_arch" >&2
+    return 1
+  fi
+  printf '[%s] 远端平台一致: %s/%s/%s\n' "$host" "$remote_distro" "$remote_major" "$remote_arch"
+}
+
+function prepare_remote_dependency_archive() {
+  local bundle_dir status=0 staging_dir archive_path target_dir
+  remote_dependency_archive=""
+  bundle_dir=$(resolve_os_packages_dir) || status=$?
+  if (( status == 3 )); then
+    return 0
+  elif (( status != 0 )); then
+    return "$status"
+  fi
+  validate_os_package_bundle "$bundle_dir" || return 1
+
+  # 只打包当前 OS/主版本/架构目录，供所有远端 worker 复用；归档内仍然
+  # 只有 RPM 依赖闭包，不加入清单或 SHA-256 文件。
+  staging_dir=$(mktemp -d /tmp/mongo-os-packages.XXXXXX) || return 1
+  MONGO_INSTALL_TMPDIRS+=("$staging_dir")
+  target_dir="${staging_dir}/mongdb-offline-rpm/${os_distro}/${os_version}/${os_arch}"
+  install -d -m 0700 "$target_dir" || return 1
+  run_managed_command cp -a "${bundle_dir}/." "$target_dir/" || return 1
+  archive_path=$(mktemp /tmp/mongo-os-packages.remote.XXXXXX.tar.gz) || return 1
+  MONGO_INSTALL_TMPFILES+=("$archive_path")
+  run_managed_command tar -C "$staging_dir" -czf "$archive_path" mongdb-offline-rpm || return 1
+  remote_dependency_archive="$archive_path"
+  printf '已生成远端节点复用的 OS 依赖闭包: %s\n' "$archive_path"
+}
+
 function calculate_app_fingerprint() {
   local app_dir="${1:-$env_app_dir}"
   [[ -d "$app_dir/bin" ]] || return 1
@@ -4034,6 +4144,7 @@ function deploy_remote_node() {
   local app_pkg="$3"
   local local_app_fingerprint="$4"
   local expected_version="$5"
+  local dependency_pkg="${6:-}"
   local -a deployment_endpoints=("$requested_endpoint")
   if [[ "$mongo_install_mode" == "single" ]]; then return 0; fi
   if [[ ${#deployment_endpoints[@]} -eq 0 ]]; then return 0; fi
@@ -4042,7 +4153,7 @@ function deploy_remote_node() {
   local_ip=$(get_local_ip)
   local script_path="${software_dir}/${script_name}"
 
-  local remote_count=0 remote_state
+  local remote_count=0 remote_state remote_status=0
 
   for host in "${deployment_endpoints[@]}"; do
     if is_local_host "$host" "$local_ip"; then
@@ -4058,6 +4169,7 @@ function deploy_remote_node() {
       echo "错误: [${host}] SSH 连接失败" >&2
       return 1
     fi
+    validate_remote_cluster_platform "$host" || return 1
 
     local remote_ip
     remote_ip=$(remote_exec "$host" "ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.*src \\([0-9.]*\\).*/\\1/p' | head -1" 2>/dev/null)
@@ -4074,11 +4186,21 @@ function deploy_remote_node() {
       echo "错误: [${host}] 脚本分发失败" >&2
       return 1
     fi
+    if [[ -n "$dependency_pkg" ]]; then
+      log_print "  [${host}] 分发 OS 离线依赖闭包..."
+      remote_copy "$dependency_pkg" "$host" "${remote_workdir}/mongdb-offline-rpm.tar.gz" || {
+        echo "错误: [${host}] OS 离线依赖闭包分发失败" >&2
+        return 1
+      }
+    else
+      # 防止复用工作目录中遗留的旧平台离线包。
+      remote_exec "$host" "rm -f '${remote_workdir}/mongdb-offline-rpm.tar.gz'" || return 1
+    fi
     local remote_node_bind_ip="${mongo_bind_ip}"
     if [[ ",${mongo_bind_ip}," != *",0.0.0.0,"* ]]; then
       remote_node_bind_ip="127.0.0.1,${remote_ip}"
     fi
-    local remote_os_command="cd '${remote_workdir}' && bash '${script_name}' -m replicaset -n '${hostname}' --os-only -d '${env_base_dir}' --data-dir '${data_dir}' --backup-dir '${backup_dir}' -ou '${mongo_owner}' -p '${mongo_port}' --bind-ip '${remote_node_bind_ip}' --mongo-version '${mongo_major_ver}.${mongo_minor_ver}.${mongo_patch_ver}' --max-connections '${max_connections}'"
+    local remote_os_command="cd '${remote_workdir}' && bash '${script_name}' -m replicaset -n '${hostname}' --os-only --no-progress --yes -d '${env_base_dir}' --data-dir '${data_dir}' --backup-dir '${backup_dir}' -ou '${mongo_owner}' -p '${mongo_port}' --bind-ip '${remote_node_bind_ip}' --mongo-version '${mongo_major_ver}.${mongo_minor_ver}.${mongo_patch_ver}' --max-connections '${max_connections}'"
     local remote_os_output
     if ! remote_os_output=$(remote_exec "$host" "$remote_os_command" 2>&1); then
       printf '%s\n' "$remote_os_output" | sed "s/^/  [${host}] /"
@@ -4131,6 +4253,33 @@ function deploy_remote_node() {
       if ! remote_copy "$app_pkg" "$host" "${remote_workdir}/mongo-app-installed.tar.gz"; then
         echo "错误: [${host}] MongoDB 包分发失败" >&2
         return 1
+      fi
+      local remote_app_dir_name
+      remote_app_dir_name=$(basename -- "$env_app_dir") || return 1
+      remote_status=0
+      remote_exec "$host" "
+        _probe_dir=\$(mktemp -d /tmp/mongodb-app-preflight.XXXXXX) || exit 40
+        trap 'rm -rf -- \"\$_probe_dir\"' EXIT HUP INT TERM
+        _probe_status=0
+        tar xzf '${remote_workdir}/mongo-app-installed.tar.gz' -C \"\$_probe_dir\" || _probe_status=41
+        _probe_binary=\"\$_probe_dir/${remote_app_dir_name}/bin/mongod\"
+        if [[ \"\$_probe_status\" == 0 ]]; then
+          [[ -x \"\$_probe_binary\" ]] || _probe_status=42
+        fi
+        if [[ \"\$_probe_status\" == 0 ]]; then
+          _probe_output=\$(\"\$_probe_binary\" --version 2>&1) || _probe_status=43
+        fi
+        if [[ \"\$_probe_status\" == 0 ]] && ! printf '%s\n' \"\$_probe_output\" | grep -Fq 'db version v${expected_version}'; then
+          printf '%s\n' \"\$_probe_output\" >&2
+          _probe_status=44
+        fi
+        exit \"\$_probe_status\"
+      " || remote_status=$?
+      if (( remote_status != 0 )); then
+        remote_exec "$host" "rm -f '${remote_workdir}/mongo-app-installed.tar.gz'" >/dev/null 2>&1 || true
+        printf '错误: [%s] 待安装 MongoDB 二进制未通过远端执行预检，原应用目录未替换（退出码 %d）\n' \
+          "$host" "$remote_status" >&2
+        return "$remote_status"
       fi
       if ! remote_exec "$host" "
         set -e
@@ -4250,7 +4399,7 @@ function deploy_remote_nodes() {
   [[ "$mongo_install_mode" == "replicaset" ]] || return 0
   local local_ip host endpoint log_file pid worker_pgid index batch_index batch_count=0 failure=0 worker_status=0 remote_count=0
   local monitor_mode_was_enabled=0
-  local app_pkg local_app_fingerprint expected_version
+  local app_pkg local_app_fingerprint expected_version dependency_pkg=""
   local -a remote_hosts=() remote_endpoints=()
   local -a batch_pids=() batch_logs=() batch_hosts=() batch_endpoints=()
   local_ip=$(get_local_ip)
@@ -4272,11 +4421,14 @@ function deploy_remote_nodes() {
     return 0
   }
 
+  prepare_remote_dependency_archive || return $?
+  dependency_pkg="$remote_dependency_archive"
+
   # 所有并行任务复用同一份只读压缩包，避免按节点重复打包。
   app_pkg=$(mktemp /tmp/mongo-app-installed.XXXXXX.tar.gz) || return 1
   MONGO_INSTALL_TMPFILES+=("$app_pkg")
   log_print "打包 MongoDB 安装目录（供 ${remote_count} 个远程节点复用）..."
-  tar czf "$app_pkg" -C "$(dirname "${env_app_dir}")" "$(basename "${env_app_dir}")" || return 1
+  run_managed_command tar czf "$app_pkg" -C "$(dirname "${env_app_dir}")" "$(basename "${env_app_dir}")" || return 1
   local_app_fingerprint=$(calculate_app_fingerprint "$env_app_dir") || return 1
   expected_version="${mongo_major_ver}.${mongo_minor_ver}.${mongo_patch_ver}"
 
@@ -4286,7 +4438,10 @@ function deploy_remote_nodes() {
     log_file=$(mktemp /tmp/mongo-remote-deploy.XXXXXX.log) || return 1
     MONGO_INSTALL_TMPFILES+=("$log_file")
     case $- in *m*) monitor_mode_was_enabled=1 ;; *) monitor_mode_was_enabled=0; set -m ;; esac
-    (deploy_remote_node "$host" "$endpoint" "$app_pkg" "$local_app_fingerprint" "$expected_version") >"$log_file" 2>&1 &
+    (
+      MONGO_REMOTE_WORKER=1
+      deploy_remote_node "$host" "$endpoint" "$app_pkg" "$local_app_fingerprint" "$expected_version" "$dependency_pkg"
+    ) >"$log_file" 2>&1 &
     pid=$!
     (( monitor_mode_was_enabled == 1 )) || set +m
     # 非交互 Bash 的 monitor 模式为每个后台 worker 建立独立进程组。
@@ -5013,11 +5168,10 @@ function validate_and_finalize_parameters() {
       return 1
     }
     expected_local_hostname=$(build_install_hostname "$hostname" "$mongo_install_mode" "$local_ip") || return 1
-    [[ "$local_member" == "$expected_local_hostname" ]] || {
-      printf '错误: 本机副本集成员名必须与安装模式生成的主机名一致：期望 %s，实际 %s\n' \
-        "$expected_local_hostname" "$local_member" >&2
-      return 1
-    }
+    if [[ "$local_member" != "$expected_local_hostname" ]]; then
+      printf '提示: 本机 OS 主机名将设置为 %s，副本集成员使用可解析别名 %s\n' \
+        "$expected_local_hostname" "$local_member"
+    fi
     if (( remote_found == 1 )); then
       [[ -f "$ssh_known_hosts_file" ]] || {
         echo "错误: SSH known_hosts 文件不存在: ${ssh_known_hosts_file}" >&2
@@ -5035,8 +5189,8 @@ function validate_and_finalize_parameters() {
 function calculate_total_steps() {
   local total
   if [[ "$only_conf_os" == "Y" ]]; then
-    # 参数/拓扑预检 + 依赖介质检测 + 9 个系统配置步骤。
-    printf '11'
+    # 参数/拓扑预检 + 目标 MongoDB 兼容性 + 依赖介质检测 + 9 个系统配置步骤。
+    printf '12'
     return
   elif [[ "$mongo_install_mode" == "replicaset" ]]; then
     # 无认证副本集基础步骤；keyFile 仅在实际生成时追加。
@@ -5460,6 +5614,7 @@ function main() {
     progress_init "$(calculate_total_steps)" "$Mongoinstalllog" || return $?
     progress_set_stage "安装预检"
     execute_and_log "验证参数与资源配置" validate_and_finalize_parameters || return $?
+    execute_and_log "验证 OS/MongoDB 版本兼容性" validate_os_only_mongo_compatibility || return $?
     begin_install_timer
     progress_set_stage "系统配置"
     execute_and_log "检查主机名" conf_hostname || return $?

@@ -181,6 +181,24 @@ else
   fail "mode-aware hostname helper exists"
 fi
 
+if (
+  mongo_install_mode=replicaset
+  only_conf_os=N
+  hostname=mongodb
+  hosts_array=(db1.example.internal db2.example.internal db3.example.internal)
+  remote_ips_array=(10.0.1.11 10.0.1.12 10.0.1.13)
+  ssh_known_hosts_file=$(mktemp)
+  get_local_ip() { printf '10.0.1.11'; }
+  validate_and_finalize_parameters >/dev/null 2>&1
+  status=$?
+  rm -f "$ssh_known_hosts_file"
+  exit "$status"
+); then
+  pass "replica-set DNS aliases may differ from generated OS hostnames"
+else
+  fail "replica-set DNS aliases may differ from generated OS hostnames"
+fi
+
 if declare -F is_local_host >/dev/null; then
   getent() {
     [[ "$1" == ahostsv4 && "$2" == mongors987 ]] || return 2
@@ -391,6 +409,61 @@ if declare -F validate_os_package_bundle >/dev/null; then
   os_packages_archive="${archive_fixture}/unsafe.tar.gz"
   os_packages_root="${archive_fixture}/unsafe-not-extracted"
   assert_failure "reject links while using one archive metadata scan" prepare_os_packages_root
+
+  : > "${fixture_dir}/requested-root-1.0-1.x86_64.rpm"
+  : > "${fixture_dir}/transitive-lib-1.0-1.x86_64.rpm"
+  if (
+    capture_file="${archive_fixture}/dnf-arguments"
+    os_packages_dir="$fixture_dir"
+    os_distro=centos
+    os_distro_family=rhel
+    os_version=7
+    os_arch=x86_64
+    rpm() {
+      if [[ "$1" == "-qp" && "$2" == "--qf" && "$3" == '%{ARCH}' ]]; then
+        printf 'x86_64'
+      elif [[ "$1" == "-qp" && "$2" == "--qf" && "$3" == '%{NAME}' ]]; then
+        case "$(basename -- "$4")" in
+          requested-root-*) printf 'requested-root' ;;
+          transitive-lib-*) printf 'transitive-lib' ;;
+          *) printf 'fixture' ;;
+        esac
+      else
+        return 0
+      fi
+    }
+    dnf() { printf '%s\n' "$@" > "$capture_file"; }
+    run_package_manager() { "$@"; }
+    install_os_offline_bundle requested-root >/dev/null 2>&1 \
+      && grep -Fqx "${fixture_dir}/requested-root-1.0-1.x86_64.rpm" "$capture_file" \
+      && grep -Fqx "${fixture_dir}/transitive-lib-1.0-1.x86_64.rpm" "$capture_file"
+  ); then
+    pass "offline installation passes the complete RPM dependency closure"
+  else
+    fail "offline installation passes the complete RPM dependency closure"
+  fi
+  if declare -F prepare_remote_dependency_archive >/dev/null && (
+    os_packages_dir="$fixture_dir"
+    os_distro=centos
+    os_version=7
+    os_arch=x86_64
+    MONGO_INSTALL_TMPFILES=()
+    MONGO_INSTALL_TMPDIRS=()
+    prepare_remote_dependency_archive >/dev/null 2>&1 || exit 1
+    archive_listing=$(tar -tzf "$remote_dependency_archive") || exit 1
+    printf '%s\n' "$archive_listing" | grep -Fq \
+      'mongdb-offline-rpm/centos/7/x86_64/transitive-lib-1.0-1.x86_64.rpm' || exit 1
+    if printf '%s\n' "$archive_listing" | sed '/\/$/d' | grep -Evq '\.rpm$'; then
+      exit 1
+    fi
+    [[ "$archive_listing" != *SHA256SUMS* ]] || exit 1
+    for tmpf in ${MONGO_INSTALL_TMPFILES[@]+"${MONGO_INSTALL_TMPFILES[@]}"}; do rm -f -- "$tmpf"; done
+    for tmpd in ${MONGO_INSTALL_TMPDIRS[@]+"${MONGO_INSTALL_TMPDIRS[@]}"}; do rm -rf -- "$tmpd"; done
+  ); then
+    pass "remote dependency archive contains only the current platform RPM closure"
+  else
+    fail "remote dependency archive contains only the current platform RPM closure"
+  fi
   os_packages_archive="$original_os_packages_archive"
   os_packages_root="$original_os_packages_root"
   os_packages_dir="$original_os_packages_dir"
@@ -514,9 +587,9 @@ if declare -F calculate_total_steps >/dev/null; then
     && pass "X.509 replica set omits the no-op keyFile step" \
     || fail "X.509 replica set omits the no-op keyFile step"
   only_conf_os=Y
-  [[ "$(calculate_total_steps)" == 11 ]] \
-    && pass "OS-only mode includes parameter and media preflight steps" \
-    || fail "OS-only mode includes parameter and media preflight steps"
+  [[ "$(calculate_total_steps)" == 12 ]] \
+    && pass "OS-only mode includes parameter, compatibility, and media preflight steps" \
+    || fail "OS-only mode includes parameter, compatibility, and media preflight steps"
   only_conf_os="$original_only_conf_os"
   mongo_install_mode="$original_install_mode"
   mongo_auth_enabled="$original_auth_enabled"
@@ -639,6 +712,124 @@ if declare -F cleanup_on_exit >/dev/null; then
   fi
 else
   fail "process-tree cleanup helper exists"
+fi
+
+if declare -F run_with_ssh_password >/dev/null; then
+  if (
+    askpass_test_dir=$(mktemp -d)
+    askpass_env_file="${askpass_test_dir}/environment"
+    askpass_argv_file="${askpass_test_dir}/argv"
+    remote_root_pass='transport-secret-987'
+    mongo_ssh_askpass_dir=''
+    MONGO_INSTALL_TMPDIRS=()
+    MONGO_REMOTE_WORKER=0
+    ssh() {
+      printf '%s' "${MONGO_SSH_ASKPASS_SECRET-}" > "$askpass_env_file"
+      printf '%s\n' "$@" > "$askpass_argv_file"
+    }
+    run_with_ssh_password ssh --transport-probe >/dev/null 2>&1
+    askpass_status=$?
+    helper_dir="$mongo_ssh_askpass_dir"
+    secret_scope_after=${MONGO_SSH_ASKPASS_SECRET+set}
+    test_result=1
+    if (( askpass_status == 0 )) \
+      && grep -Fqx 'transport-secret-987' "$askpass_env_file" \
+      && ! grep -Fq 'transport-secret-987' "$askpass_argv_file" \
+      && [[ -z "$secret_scope_after" ]]; then
+      test_result=0
+    fi
+    rm -rf "$helper_dir" "$askpass_test_dir"
+    exit "$test_result"
+  ); then
+    pass "SSH password is environment-scoped and absent from transport argv"
+  else
+    fail "SSH password is environment-scoped and absent from transport argv"
+  fi
+else
+  fail "native SSH password transport helper exists"
+fi
+
+if declare -F validate_remote_cluster_platform >/dev/null; then
+  if (
+    os_distro=rocky; os_version=9; os_arch=x86_64
+    remote_exec() { printf 'MONGO_REMOTE_PLATFORM=rocky|9|x86_64\n'; }
+    validate_remote_cluster_platform 192.0.2.20 >/dev/null 2>&1
+  ); then
+    pass "remote cluster preflight accepts an identical OS and architecture"
+  else
+    fail "remote cluster preflight accepts an identical OS and architecture"
+  fi
+  if (
+    os_distro=rocky; os_version=9; os_arch=x86_64
+    remote_exec() { printf 'MONGO_REMOTE_PLATFORM=rhel|8|x86_64\n'; }
+    validate_remote_cluster_platform 192.0.2.20 >/dev/null 2>&1
+  ); then
+    fail "remote cluster preflight rejects a different OS or major version"
+  else
+    pass "remote cluster preflight rejects a different OS or major version"
+  fi
+else
+  fail "remote cluster platform preflight exists"
+fi
+
+if declare -F deploy_remote_node >/dev/null; then
+  if (
+    remote_preflight_tmp=$(mktemp -d)
+    remote_command_log="${remote_preflight_tmp}/commands"
+    : > "$remote_command_log"
+    mongo_install_mode=replicaset
+    software_dir="$remote_preflight_tmp"
+    script_name=MongoDB.sh
+    env_base_dir=/opt/mongodb-test
+    env_app_dir=/opt/mongodb-test/app
+    data_dir=/srv/mongodb-test/data
+    backup_dir=/srv/mongodb-test/backup
+    scripts_dir=/opt/mongodb-test/scripts
+    log_dir=/srv/mongodb-test/logs
+    pid_dir=/opt/mongodb-test/run
+    mongo_owner=mongodtest
+    mongo_port=28018
+    mongo_bind_ip=0.0.0.0
+    hostname=mongodb
+    max_connections=12345
+    mongo_major_ver=8; mongo_minor_ver=0; mongo_patch_ver=29
+    mongo_auth_enabled=N
+    mongo_tls_enabled=N
+    get_local_ip() { printf '192.0.2.10'; }
+    is_local_host() { return 1; }
+    check_ssh_connectivity() { return 0; }
+    validate_remote_cluster_platform() { return 0; }
+    remote_copy() { printf '%s\n' "$*" >> "${remote_preflight_tmp}/copies"; }
+    log_print() { return 0; }
+    remote_exec() {
+      printf '%s\n' "$*" >> "$remote_command_log"
+      if [[ "$*" == *'ip -4 route get'* ]]; then
+        printf '192.0.2.20'
+      elif [[ "$*" == *'mongodb-app-preflight'* ]]; then
+        return 43
+      fi
+      return 0
+    }
+    deploy_remote_node db2.example.internal 192.0.2.20 \
+      "${remote_preflight_tmp}/mongo-app.tar.gz" fingerprint 8.0.29 \
+      "${remote_preflight_tmp}/mongdb-offline-rpm.tar.gz" >/dev/null 2>&1
+    deploy_status=$?
+    test_result=1
+    if (( deploy_status == 43 )) \
+      && grep -Fq 'mongodb-app-preflight' "$remote_command_log" \
+      && grep -Fq 'mongdb-offline-rpm.tar.gz' "${remote_preflight_tmp}/copies" \
+      && ! grep -Fq '_previous_app_dir=' "$remote_command_log"; then
+      test_result=0
+    fi
+    rm -rf "$remote_preflight_tmp"
+    exit "$test_result"
+  ); then
+    pass "remote binary preflight preserves failure code and prevents app replacement"
+  else
+    fail "remote binary preflight preserves failure code and prevents app replacement"
+  fi
+else
+  fail "remote node deployment helper exists"
 fi
 
 if declare -F calculate_app_fingerprint >/dev/null; then
@@ -825,6 +1016,15 @@ if declare -F conf_mongodb >/dev/null; then
   else
     fail "generated backup script uses selected backup directory"
   fi
+  backup_run_status=0
+  "$scripts_dir/mongo_backup.sh" >/dev/null 2>&1 || backup_run_status=$?
+  backup_archive_count=$(find "$backup_dir" -maxdepth 1 -type f -name '*.tar.gz' | wc -l)
+  backup_workdir_count=$(find "$backup_dir" -mindepth 1 -maxdepth 1 -type d | wc -l)
+  if (( backup_run_status != 0 && backup_archive_count == 0 && backup_workdir_count >= 1 )); then
+    pass "failed mongodump retains its work directory without publishing an archive"
+  else
+    fail "failed mongodump retains its work directory without publishing an archive"
+  fi
   summary_output=$(print_summary 2>&1)
   if [[ "$summary_output" == *"管理员密码      : safe-admin-password"* \
     && "$summary_output" == *"SCRAM-SHA-256"* ]]; then
@@ -876,7 +1076,7 @@ assert_file_not_contains "installer avoids speculative TCP and dirty-page tuning
 assert_file_contains "systemd file limits are resource-derived" "$installer" 'LimitNOFILE=\$\{mongo_nofile_limit\}'
 assert_file_contains "systemd permits an external data directory" "$installer" 'ReadWritePaths=\$\{env_base_dir\}[[:space:]]+\$\{data_dir\}'
 assert_file_contains "remote deployment restarts upgraded mongod" "$installer" 'systemctl[[:space:]]+restart[[:space:]]+mongod\.service'
-assert_file_contains "remote nodes are deployed by background workers" "$installer" 'deploy_remote_node[^&]*&'
+assert_file_contains "remote nodes are deployed by background workers" "$installer" '\)[[:space:]]*>"\$log_file"[[:space:]]+2>&1[[:space:]]+&'
 assert_file_contains "signal cleanup stops active remote deployment workers" "$installer" 'MONGO_REMOTE_DEPLOY_PIDS'
 assert_file_contains "remote deployment workers have tracked process groups" "$installer" 'MONGO_REMOTE_DEPLOY_PGIDS'
 assert_file_contains "progress panel uses absolute top-row rendering" "$installer" "printf '\\\\033\\[%d;1H"
@@ -1014,8 +1214,16 @@ assert_file_contains "temporary askpass helper is removed on exit" "$installer" 
 assert_file_contains "password bootstrap generates an Ed25519 key" "$installer" "ssh-keygen -q -t ed25519"
 assert_file_contains "password bootstrap installs authorized key idempotently" "$installer" 'grep -Fqx.*authorized_keys'
 assert_file_contains "password bootstrap verifies key login before deployment" "$installer" 'SSH 公钥信任验证失败'
-assert_file_contains "offline bundle selection is limited to requested package names" "$installer" 'package_name.*requested_name'
+assert_file_contains "offline bundle installs the complete resolved dependency closure" "$installer" '完整依赖闭包'
+assert_file_contains "offline bundle builder resolves transitive dependencies" "$builder" 'download.*--resolve.*--alldeps'
 assert_file_contains "dependency installation passes the current missing package set" "$installer" 'install_os_offline_bundle "\$\{requested_packages\[@\]\}"'
+assert_file_not_contains "SSH password is not passed through external env argv" "$installer" 'run_(managed_command|remote_transport_command)[[:space:]]+env'
+assert_file_contains "key-based SSH is managed by the transport wrapper" "$installer" 'run_remote_transport_command[[:space:]]+ssh'
+assert_file_contains "key-based SCP is managed by the transport wrapper" "$installer" 'run_remote_transport_command[[:space:]]+scp'
+assert_file_contains "remote deployment checks exact OS major and architecture" "$installer" 'validate_remote_cluster_platform'
+assert_file_contains "remote deployment preflights the packaged mongod binary" "$installer" 'mongodb-app-preflight'
+assert_file_contains "remote deployment sends the OS dependency closure when present" "$installer" '分发 OS 离线依赖闭包'
+assert_file_contains "failed backups do not publish normal archives" "$installer" '逻辑备份不完整，未发布正式归档'
 assert_file_contains "CentOS 7 ISO path uses yum when dnf is unavailable" "$installer" 'command -v yum'
 assert_file_contains "offline RPM signatures are verified" "$installer" 'rpm --checksig'
 assert_file_contains "documentation records native password-to-key bootstrap" "$docs" 'SSH_ASKPASS.*Ed25519'
